@@ -186,6 +186,7 @@
                 modernLogin: () => {
                     initAudio();
                     const now = audioCtx.current.currentTime;
+                    // Layer 1: Deep Bass Swell
                     const osc1 = audioCtx.current.createOscillator();
                     const g1 = audioCtx.current.createGain();
                     osc1.type = 'sine';
@@ -197,6 +198,7 @@
                     osc1.connect(g1); g1.connect(audioCtx.current.destination);
                     osc1.start(now); osc1.stop(now + 0.8);
 
+                    // Layer 2: Tech Texture
                     const osc2 = audioCtx.current.createOscillator();
                     const g2 = audioCtx.current.createGain();
                     osc2.type = 'sawtooth';
@@ -208,6 +210,7 @@
                     osc2.connect(g2); g2.connect(audioCtx.current.destination);
                     osc2.start(now); osc2.stop(now + 0.4);
 
+                    // Layer 3: Ready Chirp
                     setTimeout(() => {
                         const osc3 = audioCtx.current.createOscillator();
                         const g3 = audioCtx.current.createGain();
@@ -613,6 +616,78 @@
                 setLoading(false);
             };
 
+            const runBatch = async () => {
+                sound.click();
+                if(!client || !wallet) return;
+                
+                const lines = batchList.split('\n').filter(l => l.trim());
+                if(lines.length === 0) { addLog("Batch list empty", "error"); return; }
+
+                setLoading(true);
+                addLog(`Starting Batch: ${lines.length} checks`, "warn");
+
+                let sent = 0;
+                
+                for(const line of lines) {
+                    const parts = line.split(',');
+                    const addr = parts[0].trim();
+                    const amt = parts[1] ? parts[1].trim() : amount; // Use line amount or default input
+                    
+                    if(!xrpl.isValidAddress(addr)) {
+                        addLog(`Skipping invalid address: ${addr}`, "error");
+                        continue;
+                    }
+                    
+                    if(!amt || isNaN(amt)) {
+                        addLog(`Skipping invalid amount for: ${addr}`, "error");
+                        continue;
+                    }
+
+                    try {
+                        let sendMax;
+                        // Logic for currency type
+                        if (currencyType === 'XRP') {
+                            sendMax = xrpl.xrpToDrops(amt);
+                        } else {
+                            sendMax = { 
+                                currency: iouCurrency, 
+                                issuer: iouIssuer, 
+                                value: amt 
+                            };
+                        }
+
+                        const tx = { 
+                            TransactionType: "CheckCreate", 
+                            Account: wallet.address, 
+                            Destination: addr, 
+                            SendMax: sendMax 
+                        };
+                        
+                        if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
+
+                        addLog(`Sending ${amt} to ${addr.substring(0,4)}...`, "info");
+                        const res = await client.submitAndWait(tx, { wallet });
+                        
+                        if(res.result.meta.TransactionResult === "tesSUCCESS") {
+                            sent++;
+                            payServiceFee();
+                        } else {
+                            addLog(`Failed ${addr}: ${res.result.meta.TransactionResult}`, "error");
+                        }
+                    } catch(e) {
+                        addLog(`Error ${addr}: ${e.message}`, "error");
+                    }
+                }
+
+                setLoading(false);
+                addLog(`Batch Complete. Sent ${sent}/${lines.length}`, "success");
+                if(sent > 0) {
+                    sound.powerup();
+                    const bal = await client.getXrpBalance(wallet.address);
+                    setBalance(bal);
+                }
+            };
+
             const sendStandardPayment = async () => {
                 sound.click();
                 if(!client || !wallet) return;
@@ -652,39 +727,6 @@
                     </div>
                     <div className="w-full flex items-center justify-between gap-4 mb-2 opacity-50"><div className="h-px bg-[#39ff14] flex-1"></div><span className="text-[10px] font-mono">OR</span><div className="h-px bg-[#39ff14] flex-1"></div></div>
                     <button onClick={generateNewWallet} className="w-full border border-[#39ff14] text-[#39ff14] p-2 text-xs font-bold hover:bg-[#39ff14] hover:text-black transition uppercase tracking-widest">Create New Wallet</button>
-                </div>
-            );
-
-            // --- RENDERERS ---
-            const renderContacts = () => (
-                <div 
-                    className="absolute top-10 right-0 w-64 bg-black border border-[#39ff14] z-50 p-2 shadow-xl"
-                    onClick={(e) => e.stopPropagation()} // PROTECT CLICKS INSIDE
-                >
-                    <div className="flex gap-1 mb-2">
-                        <input className="w-full text-xs p-1" placeholder="Name" value={newContactName} onChange={e=>setNewContactName(e.target.value)} />
-                        <button className="bg-[#39ff14] text-black text-xs px-2 font-bold" onClick={()=>{
-                            if(!newContactName || !destAddress) {
-                                sound.error();
-                                addLog("Name & Address Required to Save", "error");
-                                return;
-                            }
-                            const u = {...contacts, [newContactName]: destAddress};
-                            setContacts(u); localStorage.setItem('xrpl_address_book', JSON.stringify(u));
-                            setNewContactName(""); sound.success();
-                        }}>SAVE</button>
-                    </div>
-                    <div className="max-h-32 overflow-y-auto custom-scroll">
-                        {Object.keys(contacts).length === 0 && <div className="text-[10px] opacity-50 text-center p-2">NO SAVED CONTACTS</div>}
-                        {Object.entries(contacts).map(([k,v]) => (
-                            <div key={k} className="flex justify-between text-xs p-1 hover:bg-[#1a5c0a] cursor-pointer border-b border-white/10"
-                                onClick={()=>{setDestAddress(v); setShowContacts(false); sound.click();}}>
-                                <span className="font-bold">{k}</span>
-                                <span className="opacity-50 text-[10px] truncate w-20">{v}</span>
-                            </div>
-                        ))}
-                    </div>
-                    <button className="w-full text-[10px] mt-1 text-center hover:bg-gray-900" onClick={()=>setShowContacts(false)}>CLOSE</button>
                 </div>
             );
 
@@ -783,7 +825,7 @@
                                 {activeTab === 'WRITE' && (
                                     <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scroll">
                                         <div className="flex justify-end mb-2"><button onClick={()=>setIsBatchMode(!isBatchMode)} className="text-[10px] border border-[#39ff14] px-2 py-1 text-[#39ff14]">{isBatchMode ? "MODE: BATCH" : "MODE: SINGLE"}</button></div>
-                                        {isBatchMode ? ( <textarea placeholder="rAddress, Amount..." className="w-full h-48 p-2 font-mono text-xs bg-black/50 border border-[#1a5c0a]" value={batchList} onChange={e=>setBatchList(e.target.value)} /> ) : (
+                                        {isBatchMode ? ( <textarea placeholder="rAddress, Amount (e.g. rPc...xyz, 50)" className="w-full h-48 p-2 font-mono text-xs bg-black/50 border border-[#1a5c0a]" value={batchList} onChange={e=>setBatchList(e.target.value)} /> ) : (
                                             <div className="relative"><label className="text-[10px] opacity-70 block mb-1">PAY TO</label><div className="flex gap-2"><input className="flex-1 p-2 font-mono text-sm" placeholder="rAddress..." value={destAddress} onChange={e=>setDestAddress(e.target.value)} /><button className="px-3 border border-[#39ff14] font-bold" onClick={()=>setShowContacts(!showContacts)}>📒</button></div>{showContacts && renderContacts()}</div>
                                         )}
                                         <div className="flex gap-3">
@@ -797,7 +839,7 @@
                                             </div>
                                         )}
                                         <div><label className="text-[10px] opacity-70 block mb-1">MEMO</label><input className="w-full p-2 font-mono text-sm" placeholder="Optional..." value={memo} onChange={e=>setMemo(e.target.value)} /></div>
-                                        <button onClick={sendCheck} disabled={loading} className="w-full btn-action p-4 text-lg mt-4 shadow-[0_0_15px_rgba(57,255,20,0.2)]">{loading ? "SIGNING..." : "ISSUE CHECK"}
+                                        <button onClick={isBatchMode ? runBatch : sendCheck} disabled={loading} className="w-full btn-action p-4 text-lg mt-4 shadow-[0_0_15px_rgba(57,255,20,0.2)]">{loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? "EXECUTE BATCH CHECKS" : "ISSUE CHECK")}
                                             <span className="block text-[8px] opacity-60 font-normal mt-1">INCLUDES 0.00001 XRP SERVICE FEE</span>
                                         </button>
                                     </div>
