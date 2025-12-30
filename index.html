@@ -732,6 +732,51 @@
                 setAiProcessing(false);
             };
 
+            // --- MISSING FUNCTIONS FIX ---
+            const handleAssetSelect = (e) => {
+                const idx = e.target.value;
+                if (idx !== "" && trustlines[idx]) {
+                    const selected = trustlines[idx];
+                    setIouCurrency(selected.currency);
+                    setIouIssuer(selected.account);
+                }
+            };
+
+            const checkDetails = confirmModal?.type === 'CASH' ? incomingChecks.find(c => c.id === confirmModal.id) : null;
+
+            const renderContacts = () => (
+                <div className="absolute top-full left-0 w-full bg-black border border-[#39ff14] z-50 max-h-40 overflow-y-auto">
+                    {Object.keys(contacts).length === 0 && <div className="p-2 text-[10px] text-gray-500">No contacts saved.</div>}
+                    {Object.entries(contacts).map(([name, addr]) => (
+                        <div key={addr} onClick={() => { setDestAddress(addr); setShowContacts(false); }} className="p-2 hover:bg-[#39ff14] hover:text-black cursor-pointer text-xs flex justify-between">
+                            <span>{name}</span>
+                            <span className="font-mono opacity-50">{addr.substring(0,8)}...</span>
+                        </div>
+                    ))}
+                    <div className="p-2 border-t border-gray-800">
+                        <input 
+                            placeholder="New Contact Name" 
+                            className="w-full bg-black border border-gray-700 text-[10px] p-1 mb-1 text-white"
+                            value={newContactName}
+                            onChange={(e) => setNewContactName(e.target.value)}
+                        />
+                        <button 
+                            onClick={() => {
+                                if(newContactName && destAddress) {
+                                    const newContacts = {...contacts, [newContactName]: destAddress};
+                                    setContacts(newContacts);
+                                    localStorage.setItem('xrpl_address_book', JSON.stringify(newContacts));
+                                    setNewContactName("");
+                                }
+                            }}
+                            className="w-full bg-[#1a5c0a] text-white text-[10px] py-1"
+                        >
+                            SAVE CURRENT ADDRESS
+                        </button>
+                    </div>
+                </div>
+            );
+
             const LoginPanel = () => (
                 <div className="hud-panel p-6 w-full max-w-sm rounded-lg relative overflow-hidden" id="login-panel">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#39ff14] to-transparent opacity-50"></div>
