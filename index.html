@@ -186,7 +186,6 @@
                 modernLogin: () => {
                     initAudio();
                     const now = audioCtx.current.currentTime;
-                    // Layer 1: Deep Bass Swell
                     const osc1 = audioCtx.current.createOscillator();
                     const g1 = audioCtx.current.createGain();
                     osc1.type = 'sine';
@@ -198,7 +197,6 @@
                     osc1.connect(g1); g1.connect(audioCtx.current.destination);
                     osc1.start(now); osc1.stop(now + 0.8);
 
-                    // Layer 2: Tech Texture
                     const osc2 = audioCtx.current.createOscillator();
                     const g2 = audioCtx.current.createGain();
                     osc2.type = 'sawtooth';
@@ -210,7 +208,6 @@
                     osc2.connect(g2); g2.connect(audioCtx.current.destination);
                     osc2.start(now); osc2.stop(now + 0.4);
 
-                    // Layer 3: Ready Chirp
                     setTimeout(() => {
                         const osc3 = audioCtx.current.createOscillator();
                         const g3 = audioCtx.current.createGain();
@@ -297,7 +294,14 @@
 
             useEffect(() => {
                 const saved = localStorage.getItem('xrpl_address_book');
-                if (saved) setContacts(JSON.parse(saved));
+                if (saved) {
+                    try {
+                        setContacts(JSON.parse(saved) || {});
+                    } catch (e) {
+                        console.error("Error loading contacts", e);
+                        setContacts({});
+                    }
+                }
             }, []);
 
             useEffect(() => {
@@ -651,6 +655,39 @@
                 </div>
             );
 
+            // --- RENDERERS ---
+            const renderContacts = () => (
+                <div 
+                    className="absolute top-10 right-0 w-64 bg-black border border-[#39ff14] z-50 p-2 shadow-xl"
+                    onClick={(e) => e.stopPropagation()} // PROTECT CLICKS INSIDE
+                >
+                    <div className="flex gap-1 mb-2">
+                        <input className="w-full text-xs p-1" placeholder="Name" value={newContactName} onChange={e=>setNewContactName(e.target.value)} />
+                        <button className="bg-[#39ff14] text-black text-xs px-2 font-bold" onClick={()=>{
+                            if(!newContactName || !destAddress) {
+                                sound.error();
+                                addLog("Name & Address Required to Save", "error");
+                                return;
+                            }
+                            const u = {...contacts, [newContactName]: destAddress};
+                            setContacts(u); localStorage.setItem('xrpl_address_book', JSON.stringify(u));
+                            setNewContactName(""); sound.success();
+                        }}>SAVE</button>
+                    </div>
+                    <div className="max-h-32 overflow-y-auto custom-scroll">
+                        {Object.keys(contacts).length === 0 && <div className="text-[10px] opacity-50 text-center p-2">NO SAVED CONTACTS</div>}
+                        {Object.entries(contacts).map(([k,v]) => (
+                            <div key={k} className="flex justify-between text-xs p-1 hover:bg-[#1a5c0a] cursor-pointer border-b border-white/10"
+                                onClick={()=>{setDestAddress(v); setShowContacts(false); sound.click();}}>
+                                <span className="font-bold">{k}</span>
+                                <span className="opacity-50 text-[10px] truncate w-20">{v}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <button className="w-full text-[10px] mt-1 text-center hover:bg-gray-900" onClick={()=>setShowContacts(false)}>CLOSE</button>
+                </div>
+            );
+
             const getCheckDetailsForModal = () => {
                 if(!confirmModal) return null;
                 if(confirmModal.type === 'CASH') return incomingChecks.find(c => c.id === confirmModal.id);
@@ -828,10 +865,8 @@
                                                 <div className="flex gap-2"><select className="flex-1 p-2 font-mono text-xs bg-[#050505] border border-[#1a5c0a] truncate" value={payAssetIdx} onChange={(e) => setPayAssetIdx(e.target.value)}><option value="XRP">XRP</option>{trustlines.map((t, idx) => (<option key={idx} value={idx}>{decodeCurrency(t.currency)}</option>))}</select><input className="w-1/3 p-2 font-mono text-xs text-right" placeholder="Amount" type="number" value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} /></div>
                                                 <input className="w-full p-2 font-mono text-xs" placeholder="Destination Address (r...)" value={paymentDest} onChange={e=>setPaymentDest(e.target.value)} />
                                             </div>
-                                            <button onClick={sendStandardPayment} disabled={loading} className="w-full bg-[#1a5c0a] text-white text-xs py-2 font-bold hover:bg-[#39ff14] hover:text-black transition">
-                                                {payAssetIdx === "XRP" ? "SEND XRP NOW" : `SEND ${decodeCurrency(trustlines[payAssetIdx]?.currency || "ASSET")} NOW`}
-                                                <span className="block text-[8px] opacity-60 font-normal mt-1">INCLUDES 0.00001 XRP SERVICE FEE</span>
-                                            </button>
+                                            <button onClick={sendStandardPayment} disabled={loading} className="w-full bg-[#1a5c0a] text-white text-xs py-2 font-bold hover:bg-[#39ff14] hover:text-black transition">{payAssetIdx === "XRP" ? "SEND XRP NOW" : `SEND ${decodeCurrency(trustlines[payAssetIdx]?.currency || "ASSET")} NOW`}
+                                            <span className="block text-[8px] opacity-60 font-normal mt-1">INCLUDES 0.00001 XRP SERVICE FEE</span></button>
                                         </div>
                                     </div>
                                 )}
