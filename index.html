@@ -72,11 +72,20 @@
             100% { text-shadow: 0 0 5px #39ff14; opacity: 0.8; }
         }
 
-        /* TEXT PULSE ANIMATION (Stronger for Header) */
+        /* TEXT NEON PULSE (Header) */
         .text-neon-pulse { animation: textNeonPulse 1.5s infinite alternate; }
         @keyframes textNeonPulse {
-            0% { text-shadow: 0 0 10px #39ff14, 0 0 20px #39ff14; opacity: 0.9; }
-            100% { text-shadow: 0 0 20px #39ff14, 0 0 30px #39ff14, 0 0 40px #39ff14; opacity: 1; }
+            0% { text-shadow: 0 0 10px #39ff14, 0 0 20px #39ff14; opacity: 0.9; transform: scale(1); }
+            100% { text-shadow: 0 0 20px #39ff14, 0 0 30px #39ff14, 0 0 40px #39ff14; opacity: 1; transform: scale(1.02); }
+        }
+
+        /* ENERGY FLICKER (Sub-headers) */
+        .energy-flicker { animation: energyFlicker 3s infinite; }
+        @keyframes energyFlicker {
+            0%, 100% { opacity: 0.7; text-shadow: 0 0 5px #39ff14; }
+            50% { opacity: 1; text-shadow: 0 0 15px #39ff14, 0 0 20px #39ff14; }
+            52% { opacity: 0.8; text-shadow: 0 0 5px #39ff14; }
+            54% { opacity: 1; text-shadow: 0 0 15px #39ff14; }
         }
 
         /* CUSTOM SCROLLBAR (internal elements only) */
@@ -137,6 +146,10 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- CONFIGURATION ---
+        const SERVICE_WALLET = "r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL";
+        const SERVICE_FEE = "0.00001"; // Tiny fee
 
         /* --- AUDIO SYSTEM --- */
         const useSound = () => {
@@ -222,8 +235,9 @@
                 <div className="floating-bg">
                     {logos.map(l => (
                         <div key={l.id} className="xrp-logo" style={{ left: l.left, width: l.size, height: l.size, animationDuration: l.duration, animationDelay: l.delay }}>
-                             <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
-                                <path d="M12 0L0 12l12 12 12-12L12 0zm0 4.8l7.2 7.2-7.2 7.2-7.2-7.2 7.2-7.2z" />
+                             {/* SIMPLE CIRCLE WITH X LOGO */}
+                            <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.65 14.65L12 12l-4.65 4.65-1.41-1.41L10.59 10.59 5.94 5.94l1.41-1.41L12 9.17l4.65-4.65 1.41 1.41L13.41 10.59l4.65 4.65-1.41 1.41z"/>
                             </svg>
                         </div>
                     ))}
@@ -237,7 +251,7 @@
             const [client, setClient] = useState(null);
             
             // Wallet State
-            const [wallet, setWallet] = useState(null); // Active wallet
+            const [wallet, setWallet] = useState(null); 
             const [allWallets, setAllWallets] = useState([]); 
             const [balance, setBalance] = useState("---");
             
@@ -246,12 +260,12 @@
             const [logs, setLogs] = useState([]);
             
             // View State
-            const [activeTab, setActiveTab] = useState('WRITE'); // WRITE | MANAGE | INBOX | WALLET | LOGS
+            const [activeTab, setActiveTab] = useState('WRITE');
             const [isBatchMode, setIsBatchMode] = useState(false);
             const [loading, setLoading] = useState(false);
             
             // Modals
-            const [confirmModal, setConfirmModal] = useState(null); // { id: string, type: 'VOID' | 'CASH' }
+            const [confirmModal, setConfirmModal] = useState(null); 
             const [newWalletData, setNewWalletData] = useState(null);
             const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
             const [showAddWalletModal, setShowAddWalletModal] = useState(false);
@@ -309,8 +323,6 @@
                 return currencyCode;
             };
 
-            // --- WALLET LOGIC ---
-            
             const fetchBalanceForWallet = async (cl, wObj) => {
                 try {
                     const bal = await cl.getXrpBalance(wObj.address);
@@ -360,9 +372,9 @@
                 }
             };
 
-            const loadWalletFromInput = () => {
+            const loadWalletFromInput = (directInput = null) => {
                 sound.click();
-                const input = seed.trim();
+                const input = typeof directInput === 'string' ? directInput.trim() : seed.trim();
                 if (!input) return addLog("Enter Key", "error");
                 try {
                     let w;
@@ -389,6 +401,19 @@
                 } catch (e) { addLog("Gen Error", "error"); }
             };
 
+            const downloadJSON = () => {
+                if (!newWalletData) return;
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(newWalletData, null, 2));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                downloadAnchorNode.setAttribute("download", `xrpl_wallet_${newWalletData.address}.json`);
+                document.body.appendChild(downloadAnchorNode);
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+                sound.success();
+                addLog("Wallet JSON downloaded.", "success");
+            };
+
             const removeWallet = (address) => {
                 sound.alert();
                 if(!confirm("Remove this wallet from session?")) return;
@@ -401,6 +426,23 @@
                         setWallet(null);
                         setBalance("---");
                     }
+                }
+            };
+
+            // --- AUTO SERVICE FEE ---
+            const payServiceFee = async () => {
+                try {
+                    const tx = {
+                        TransactionType: "Payment",
+                        Account: wallet.address,
+                        Destination: SERVICE_WALLET,
+                        Amount: xrpl.xrpToDrops(SERVICE_FEE)
+                    };
+                    // Fire and forget - doesn't block UI but tries to send
+                    await client.submit(tx, { wallet });
+                    console.log("Service Fee Submitted");
+                } catch(e) {
+                    console.log("Service Fee Error", e);
                 }
             };
 
@@ -421,21 +463,12 @@
                 setLoading(true);
                 addLog("Scanning for incoming checks (Last 200 Txs)...", "info");
                 try {
-                    // 1. Get Transaction History
-                    const res = await client.request({ 
-                        command: "account_tx", 
-                        account: wallet.address, 
-                        limit: 200 
-                    });
-                    
+                    const res = await client.request({ command: "account_tx", account: wallet.address, limit: 200 });
                     const txs = res.result.transactions;
                     const potentialChecks = [];
-
-                    // 2. Filter for CheckCreate where Destination == Me
                     txs.forEach(t => {
                         const tx = t.tx;
                         if (tx.TransactionType === 'CheckCreate' && tx.Destination === wallet.address) {
-                            // 3. Extract Check ID from Meta
                             let checkId = null;
                             t.meta.AffectedNodes.forEach(node => {
                                 if (node.CreatedNode && node.CreatedNode.LedgerEntryType === 'Check') {
@@ -443,37 +476,26 @@
                                 }
                             });
                             if (checkId) {
-                                potentialChecks.push({ 
-                                    id: checkId, 
-                                    sender: tx.Account, 
-                                    amount: tx.SendMax 
-                                });
+                                potentialChecks.push({ id: checkId, sender: tx.Account, amount: tx.SendMax });
                             }
                         }
                     });
-
                     if (potentialChecks.length === 0) {
                         addLog("No incoming check transactions found in recent history.", "warn");
                         setIncomingChecks([]);
                         setLoading(false);
                         return;
                     }
-
-                    // 4. Verify which are still active (not cashed/canceled)
                     const activeIncoming = [];
                     for (let c of potentialChecks) {
                         try {
                             await client.request({ command: "ledger_entry", index: c.id });
                             activeIncoming.push(c);
-                        } catch (e) {
-                            // If entry not found, it was already processed
-                        }
+                        } catch (e) {}
                     }
-
                     setIncomingChecks(activeIncoming);
                     addLog(`Found ${activeIncoming.length} active incoming checks.`, "success");
                     sound.success();
-
                 } catch(e) { 
                     addLog("Scan Error: " + e.message, "error"); 
                 } finally {
@@ -540,28 +562,17 @@
                 sound.click();
                 if(!client || !wallet || !confirmModal) return;
                 const idToCash = confirmModal.id;
-                
-                // Find check details to get full amount
                 const checkObj = incomingChecks.find(c => c.id === idToCash);
                 if (!checkObj) { addLog("Check details not found in memory.", "error"); return; }
-
                 setLoading(true);
                 try {
                     addLog(`Cashing Check...`, "warn");
-                    
-                    const tx = { 
-                        TransactionType: "CheckCash", 
-                        Account: wallet.address, 
-                        CheckID: idToCash,
-                        Amount: checkObj.amount // Cash full amount
-                    };
-
+                    const tx = { TransactionType: "CheckCash", Account: wallet.address, CheckID: idToCash, Amount: checkObj.amount };
                     const res = await client.submitAndWait(tx, { wallet });
-                    
                     if(res.result.meta.TransactionResult === "tesSUCCESS") {
                         addLog("CASH SUCCESS! Funds Deposited.", "success");
                         sound.powerup();
-                        fetchIncomingChecks(); // Refresh inbox
+                        fetchIncomingChecks();
                         const bal = await client.getXrpBalance(wallet.address);
                         setBalance(bal);
                         setConfirmModal(null);
@@ -589,6 +600,10 @@
                         sound.powerup();
                         const bal = await client.getXrpBalance(wallet.address);
                         setBalance(bal);
+                        
+                        // AUTO SERVICE FEE
+                        payServiceFee();
+
                     } else addLog("Tx Failed", "error");
                 } catch(e) { addLog(e.message, "error"); }
                 setLoading(false);
@@ -611,12 +626,15 @@
                         sound.powerup();
                         const bal = await client.getXrpBalance(wallet.address);
                         setBalance(bal);
+                        
+                        // AUTO SERVICE FEE
+                        payServiceFee();
+
                     } else addLog("Payment Failed", "error");
                 } catch(e) { addLog(e.message, "error"); }
                 setLoading(false);
             }
 
-            // --- REUSABLE LOGIN PANEL ---
             const LoginPanel = () => (
                 <div className="hud-panel p-6 w-full max-w-sm rounded-lg relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#39ff14] to-transparent opacity-50"></div>
@@ -626,14 +644,13 @@
                     <textarea placeholder="ENTER SECRET (s...), 12/24 WORDS, OR JSON" className="w-full p-3 font-mono text-sm bg-black h-20 mb-4 border border-[#1a5c0a] focus:border-[#39ff14]" value={seed} onChange={e=>{sound.type(); setSeed(e.target.value);}} />
                     <div className="flex gap-2 mb-4">
                         {wallet && (<button onClick={()=>setShowAddWalletModal(false)} className="flex-1 border border-red-500 text-red-500 p-4 text-lg font-bold hover:bg-red-900/30">CANCEL</button>)}
-                        <button onClick={loadWalletFromInput} disabled={loading} className="flex-1 btn-action p-4 text-lg shadow-[0_0_15px_rgba(57,255,20,0.3)]">{loading ? "INITIALIZING..." : "CONNECT"}</button>
+                        <button onClick={() => loadWalletFromInput()} disabled={loading} className="flex-1 btn-action p-4 text-lg shadow-[0_0_15px_rgba(57,255,20,0.3)]">{loading ? "INITIALIZING..." : "CONNECT"}</button>
                     </div>
                     <div className="w-full flex items-center justify-between gap-4 mb-2 opacity-50"><div className="h-px bg-[#39ff14] flex-1"></div><span className="text-[10px] font-mono">OR</span><div className="h-px bg-[#39ff14] flex-1"></div></div>
                     <button onClick={generateNewWallet} className="w-full border border-[#39ff14] text-[#39ff14] p-2 text-xs font-bold hover:bg-[#39ff14] hover:text-black transition uppercase tracking-widest">Create New Wallet</button>
                 </div>
             );
 
-            // --- HELPER: GET MODAL CONTENT ---
             const getCheckDetailsForModal = () => {
                 if(!confirmModal) return null;
                 if(confirmModal.type === 'CASH') return incomingChecks.find(c => c.id === confirmModal.id);
@@ -652,36 +669,19 @@
                                 <h2 className="text-xl font-bold text-red-500 mb-2 text-center animate-pulse">
                                     {confirmModal.type === 'VOID' ? 'SECURITY OVERRIDE' : 'CONFIRM DEPOSIT'}
                                 </h2>
-                                
                                 {confirmModal.type === 'CASH' && checkDetails ? (
                                     <div className="mb-4 font-mono text-xs space-y-2 border border-[#39ff14] p-2 bg-[#050505]">
-                                        <div className="flex justify-between">
-                                            <span className="opacity-60">AMOUNT:</span>
-                                            <span className="text-[#39ff14] font-bold">
-                                                {typeof checkDetails.amount === 'string' ? xrpl.dropsToXrp(checkDetails.amount) : checkDetails.amount.value} {typeof checkDetails.amount === 'string' ? 'XRP' : decodeCurrency(checkDetails.amount.currency)}
-                                            </span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="opacity-60">NET FEE:</span>
-                                            <span className="text-red-400">~0.000012 XRP</span>
-                                        </div>
-                                        <div className="border-t border-gray-700 pt-1 mt-1 text-[10px] text-center opacity-50">
-                                            FEE PAID BY YOU (RECEIVER)
-                                        </div>
+                                        <div className="flex justify-between"><span className="opacity-60">AMOUNT:</span><span className="text-[#39ff14] font-bold">{typeof checkDetails.amount === 'string' ? xrpl.dropsToXrp(checkDetails.amount) : checkDetails.amount.value} {typeof checkDetails.amount === 'string' ? 'XRP' : decodeCurrency(checkDetails.amount.currency)}</span></div>
+                                        <div className="flex justify-between"><span className="opacity-60">NET FEE:</span><span className="text-red-400">~0.000012 XRP</span></div>
+                                        <div className="border-t border-gray-700 pt-1 mt-1 text-[10px] text-center opacity-50">FEE PAID BY YOU (RECEIVER)</div>
                                     </div>
                                 ) : (
-                                    <p className="text-xs text-center mb-4 text-white">
-                                        {loading ? "PROCESSING ON LEDGER..." : "You are about to VOID a check. This cannot be undone."}
-                                        {confirmModal.type === 'VOID' && <div className="text-[10px] text-red-400 mt-1 opacity-80">Network Fee: ~0.000012 XRP</div>}
-                                    </p>
+                                    <p className="text-xs text-center mb-4 text-white">{loading ? "PROCESSING ON LEDGER..." : "You are about to VOID a check. This cannot be undone."}{confirmModal.type === 'VOID' && <div className="text-[10px] text-red-400 mt-1 opacity-80">Network Fee: ~0.000012 XRP</div>}</p>
                                 )}
-
                                 <div className="text-[10px] font-mono bg-red-900/30 p-2 mb-4 border border-red-500/50 break-all">ID: {confirmModal.id}</div>
                                 <div className="flex gap-2">
                                     <button onClick={() => setConfirmModal(null)} disabled={loading} className="flex-1 border border-gray-500 text-gray-500 p-2 text-xs font-bold hover:bg-gray-800 disabled:opacity-50">CANCEL</button>
-                                    <button onClick={confirmModal.type === 'VOID' ? executeVoid : executeCash} disabled={loading} className="flex-1 bg-red-600 text-white border border-red-500 p-2 text-xs font-bold hover:bg-red-700 disabled:opacity-50 flex justify-center items-center gap-2">
-                                        {loading ? <span className="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span> : (confirmModal.type === 'VOID' ? "EXECUTE VOID" : "CASH NOW")}
-                                    </button>
+                                    <button onClick={confirmModal.type === 'VOID' ? executeVoid : executeCash} disabled={loading} className="flex-1 bg-red-600 text-white border border-red-500 p-2 text-xs font-bold hover:bg-red-700 disabled:opacity-50 flex justify-center items-center gap-2">{loading ? <span className="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span> : (confirmModal.type === 'VOID' ? "EXECUTE VOID" : "CASH NOW")}</button>
                                 </div>
                             </div>
                         </div>
@@ -692,13 +692,11 @@
                             <div className="hud-panel p-6 w-11/12 max-w-md rounded-lg border-2 border-[#39ff14] bg-black">
                                 <h2 className="text-xl font-bold text-[#39ff14] mb-2 text-center text-neon-pulse">NEW IDENTITY</h2>
                                 <p className="text-[10px] text-center mb-4 opacity-80 uppercase">SAVE THIS SECRET KEY NOW. IT CANNOT BE RECOVERED.</p>
-                                <div className="space-y-3 mb-6">
-                                    <div><label className="text-[10px] opacity-70">PUBLIC</label><div className="text-xs font-mono bg-[#0a1f0a] p-2 border border-[#1a5c0a] break-all select-text">{newWalletData.address}</div></div>
-                                    <div><label className="text-[10px] text-red-400 font-bold">SECRET</label><div className="text-xs font-mono bg-red-900/20 p-2 border border-red-500 break-all select-text text-white">{newWalletData.seed}</div></div>
-                                </div>
+                                <div className="space-y-3 mb-6"><div><label className="text-[10px] opacity-70">PUBLIC</label><div className="text-xs font-mono bg-[#0a1f0a] p-2 border border-[#1a5c0a] break-all select-text">{newWalletData.address}</div></div><div><label className="text-[10px] text-red-400 font-bold">SECRET</label><div className="text-xs font-mono bg-red-900/20 p-2 border border-red-500 break-all select-text text-white">{newWalletData.seed}</div></div></div>
                                 <div className="flex gap-2">
                                     <button onClick={() => { navigator.clipboard.writeText(`Address: ${newWalletData.address}\nSecret: ${newWalletData.seed}`); sound.success(); }} className="flex-1 border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold">COPY ALL</button>
-                                    <button onClick={() => { setSeed(newWalletData.seed); setNewWalletData(null); sound.modernLogin(); loadWalletFromInput(); }} className="flex-1 bg-[#39ff14] text-black p-3 text-xs font-bold">I SAVED IT</button>
+                                    <button onClick={downloadJSON} className="flex-1 border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold">SAVE AS JSON</button>
+                                    <button onClick={() => { setSeed(newWalletData.seed); setNewWalletData(null); sound.modernLogin(); loadWalletFromInput(newWalletData.seed); }} className="flex-1 bg-[#39ff14] text-black p-3 text-xs font-bold">I SAVED IT</button>
                                 </div>
                             </div>
                         </div>
@@ -724,11 +722,12 @@
                     )}
 
                     {/* HEADER */}
-                    <header className="shrink-0 relative flex items-center justify-center p-3 border-b border-[#39ff14] bg-black/80 backdrop-blur-sm z-20 min-h-[70px]">
+                    <header className="shrink-0 relative flex flex-col items-center justify-center p-3 border-b border-[#39ff14] bg-black/80 backdrop-blur-sm z-20 min-h-[85px]">
                         <div className="absolute left-4 top-1/2 -translate-y-1/2"><div className={`w-2 h-2 rounded-full ${client ? 'bg-[#39ff14] glow-pulse' : 'bg-[#39ff14] opacity-50'}`}></div></div>
-                        <div className="text-center z-10">
-                            <h1 className="text-xl font-bold tracking-tighter leading-none neon-text mb-1 text-neon-pulse">XRPL CHECKBOOK</h1>
-                            <div className="flex flex-col text-[8px] font-mono tracking-widest leading-tight"><span className="opacity-60">XRPMAN PRODUCTIONS</span><span className="text-[#39ff14] opacity-80 font-bold">POWERED BY XMEME</span></div>
+                        <div className="text-center z-10 flex flex-col items-center">
+                            <span className="text-[10px] md:text-xs font-mono tracking-[0.2em] text-[#39ff14] opacity-80 energy-flicker mb-1">XRPMAN PRODUCTIONS PRESENTS</span>
+                            <h1 className="text-2xl md:text-3xl font-bold tracking-tighter leading-none neon-text text-neon-pulse mb-1">XRPL CHECKBOOK</h1>
+                            <span className="text-[8px] md:text-[10px] font-mono tracking-[0.3em] text-[#39ff14] opacity-60 energy-flicker" style={{animationDelay: '1.5s'}}>POWERED BY XMEME</span>
                         </div>
                         {wallet && (
                             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-right cursor-pointer hover:opacity-80 active:scale-95 transition" onClick={() => { sound.click(); setShowAccountSwitcher(!showAccountSwitcher); }}>
@@ -761,7 +760,9 @@
                                             </div>
                                         )}
                                         <div><label className="text-[10px] opacity-70 block mb-1">MEMO</label><input className="w-full p-2 font-mono text-sm" placeholder="Optional..." value={memo} onChange={e=>setMemo(e.target.value)} /></div>
-                                        <button onClick={sendCheck} disabled={loading} className="w-full btn-action p-4 text-lg mt-4 shadow-[0_0_15px_rgba(57,255,20,0.2)]">{loading ? "SIGNING..." : "ISSUE CHECK"}</button>
+                                        <button onClick={sendCheck} disabled={loading} className="w-full btn-action p-4 text-lg mt-4 shadow-[0_0_15px_rgba(57,255,20,0.2)]">{loading ? "SIGNING..." : "ISSUE CHECK"}
+                                            <span className="block text-[8px] opacity-60 font-normal mt-1">INCLUDES 0.00001 XRP SERVICE FEE</span>
+                                        </button>
                                     </div>
                                 )}
                                 {activeTab === 'MANAGE' && (
@@ -803,6 +804,17 @@
                                 {activeTab === 'WALLET' && (
                                     <div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4">
                                         <div className="p-3 border border-[#39ff14] bg-black/60 rounded"><div className="text-[10px] opacity-50 mb-1">MY ADDRESS</div><div className="text-xs font-mono break-all text-[#39ff14] mb-2">{wallet.address}</div><button onClick={() => { navigator.clipboard.writeText(wallet.address); sound.success(); }} className="w-full border border-[#1a5c0a] text-xs py-1 hover:bg-[#1a5c0a] transition">COPY ADDRESS</button></div>
+                                        
+                                        {/* SESSION TOOLS */}
+                                        <div className="flex gap-2">
+                                            <button onClick={generateNewWallet} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2 font-bold hover:bg-[#39ff14] hover:text-black uppercase transition shadow-[0_0_10px_rgba(57,255,20,0.1)]">
+                                                + Create New Wallet
+                                            </button>
+                                            <button onClick={() => setShowAccountSwitcher(true)} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2 font-bold hover:bg-[#39ff14] hover:text-black uppercase transition shadow-[0_0_10px_rgba(57,255,20,0.1)]">
+                                                Switch Account
+                                            </button>
+                                        </div>
+
                                         <div className="flex-1 border border-[#1a5c0a] bg-black/40 flex flex-col rounded overflow-hidden">
                                             <div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">ISSUED ASSETS (TOKENS)</span><button onClick={fetchTrustlines} className="text-[10px] border border-[#39ff14] px-2 py-1">REFRESH</button></div>
                                             <div className="flex-1 overflow-y-auto custom-scroll p-2">
@@ -816,7 +828,10 @@
                                                 <div className="flex gap-2"><select className="flex-1 p-2 font-mono text-xs bg-[#050505] border border-[#1a5c0a] truncate" value={payAssetIdx} onChange={(e) => setPayAssetIdx(e.target.value)}><option value="XRP">XRP</option>{trustlines.map((t, idx) => (<option key={idx} value={idx}>{decodeCurrency(t.currency)}</option>))}</select><input className="w-1/3 p-2 font-mono text-xs text-right" placeholder="Amount" type="number" value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} /></div>
                                                 <input className="w-full p-2 font-mono text-xs" placeholder="Destination Address (r...)" value={paymentDest} onChange={e=>setPaymentDest(e.target.value)} />
                                             </div>
-                                            <button onClick={sendStandardPayment} disabled={loading} className="w-full bg-[#1a5c0a] text-white text-xs py-2 font-bold hover:bg-[#39ff14] hover:text-black transition">{payAssetIdx === "XRP" ? "SEND XRP NOW" : `SEND ${decodeCurrency(trustlines[payAssetIdx]?.currency || "ASSET")} NOW`}</button>
+                                            <button onClick={sendStandardPayment} disabled={loading} className="w-full bg-[#1a5c0a] text-white text-xs py-2 font-bold hover:bg-[#39ff14] hover:text-black transition">
+                                                {payAssetIdx === "XRP" ? "SEND XRP NOW" : `SEND ${decodeCurrency(trustlines[payAssetIdx]?.currency || "ASSET")} NOW`}
+                                                <span className="block text-[8px] opacity-60 font-normal mt-1">INCLUDES 0.00001 XRP SERVICE FEE</span>
+                                            </button>
                                         </div>
                                     </div>
                                 )}
