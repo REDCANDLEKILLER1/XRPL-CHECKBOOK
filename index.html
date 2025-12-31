@@ -427,6 +427,51 @@
 
             useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
+            // Define derived state for modal
+            const checkDetails = confirmModal && confirmModal.type === 'CASH' 
+                ? incomingChecks.find(c => c.id === confirmModal.id) 
+                : null;
+
+            // Define missing handlers
+            const handleAssetSelect = (e) => {
+                const idx = e.target.value;
+                if (idx !== "" && trustlines[idx]) {
+                    const asset = trustlines[idx];
+                    setIouCurrency(asset.currency);
+                    setIouIssuer(asset.account);
+                }
+            };
+
+            const saveContact = () => {
+                if(!newContactName || !destAddress) return;
+                const newContacts = {...contacts, [newContactName]: destAddress};
+                setContacts(newContacts);
+                localStorage.setItem('xrpl_address_book', JSON.stringify(newContacts));
+                setNewContactName("");
+                sound.success();
+            };
+
+            const renderContacts = () => (
+                <div className="absolute top-full left-0 w-full bg-black border border-[#39ff14] z-50 p-2 shadow-xl animate-fadeIn mt-1">
+                     <div className="flex gap-1 mb-2">
+                        <input className="flex-1 p-1 text-xs bg-[#050505] border border-[#1a5c0a] text-[#39ff14]" placeholder="Save address as..." value={newContactName} onChange={e=>setNewContactName(e.target.value)} />
+                        <button onClick={saveContact} className="text-[10px] bg-[#39ff14] text-black px-2 font-bold hover:bg-white">SAVE</button>
+                     </div>
+                     <div className="max-h-32 overflow-y-auto custom-scroll space-y-1">
+                        {Object.entries(contacts).map(([name, addr]) => (
+                            <div key={name} className="flex justify-between items-center text-xs p-1 hover:bg-[#1a5c0a] cursor-pointer border-b border-gray-800 last:border-0" onClick={()=>{setDestAddress(addr); setShowContacts(false);}}>
+                                <span className="font-bold text-[#39ff14]">{name}</span>
+                                <span className="opacity-50 text-[10px] font-mono">{addr.substring(0,8)}...</span>
+                            </div>
+                        ))}
+                        {Object.keys(contacts).length === 0 && <div className="text-[10px] text-center opacity-50 py-2">No saved contacts</div>}
+                     </div>
+                     <div className="text-center mt-2 border-t border-gray-800 pt-1">
+                        <button onClick={()=>setShowContacts(false)} className="text-[10px] text-gray-500 hover:text-white">CLOSE</button>
+                     </div>
+                </div>
+            );
+
             // --- TOUR ENGINE ---
             useEffect(() => {
                 if (!wallet && !localStorage.getItem('xrpl_login_tour_seen')) {
@@ -732,51 +777,6 @@
                 setAiProcessing(false);
             };
 
-            // --- MISSING FUNCTIONS FIX ---
-            const handleAssetSelect = (e) => {
-                const idx = e.target.value;
-                if (idx !== "" && trustlines[idx]) {
-                    const selected = trustlines[idx];
-                    setIouCurrency(selected.currency);
-                    setIouIssuer(selected.account);
-                }
-            };
-
-            const checkDetails = confirmModal?.type === 'CASH' ? incomingChecks.find(c => c.id === confirmModal.id) : null;
-
-            const renderContacts = () => (
-                <div className="absolute top-full left-0 w-full bg-black border border-[#39ff14] z-50 max-h-40 overflow-y-auto">
-                    {Object.keys(contacts).length === 0 && <div className="p-2 text-[10px] text-gray-500">No contacts saved.</div>}
-                    {Object.entries(contacts).map(([name, addr]) => (
-                        <div key={addr} onClick={() => { setDestAddress(addr); setShowContacts(false); }} className="p-2 hover:bg-[#39ff14] hover:text-black cursor-pointer text-xs flex justify-between">
-                            <span>{name}</span>
-                            <span className="font-mono opacity-50">{addr.substring(0,8)}...</span>
-                        </div>
-                    ))}
-                    <div className="p-2 border-t border-gray-800">
-                        <input 
-                            placeholder="New Contact Name" 
-                            className="w-full bg-black border border-gray-700 text-[10px] p-1 mb-1 text-white"
-                            value={newContactName}
-                            onChange={(e) => setNewContactName(e.target.value)}
-                        />
-                        <button 
-                            onClick={() => {
-                                if(newContactName && destAddress) {
-                                    const newContacts = {...contacts, [newContactName]: destAddress};
-                                    setContacts(newContacts);
-                                    localStorage.setItem('xrpl_address_book', JSON.stringify(newContacts));
-                                    setNewContactName("");
-                                }
-                            }}
-                            className="w-full bg-[#1a5c0a] text-white text-[10px] py-1"
-                        >
-                            SAVE CURRENT ADDRESS
-                        </button>
-                    </div>
-                </div>
-            );
-
             const LoginPanel = () => (
                 <div className="hud-panel p-6 w-full max-w-sm rounded-lg relative overflow-hidden" id="login-panel">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#39ff14] to-transparent opacity-50"></div>
@@ -1041,3 +1041,5 @@
     </script>
 </body>
 </html>
+
+
