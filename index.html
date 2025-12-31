@@ -172,6 +172,14 @@
         }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+        /* PREVIEW CARD STYLES */
+        .preview-row { display: flex; justify-content: space-between; border-bottom: 1px solid #1a5c0a; padding: 8px 0; font-family: 'Share Tech Mono', monospace; font-size: 11px; }
+        .preview-row:last-child { border-bottom: none; }
+        .preview-label { color: #888; text-transform: uppercase; }
+        .preview-val { color: #fff; font-weight: bold; }
+        .risk-warning { background: rgba(255, 0, 0, 0.1); border: 1px solid red; color: red; padding: 10px; margin-top: 10px; font-size: 10px; text-align: center; animation: pulseRed 2s infinite; }
+        @keyframes pulseRed { 0% { opacity: 0.8; } 50% { opacity: 1; box-shadow: 0 0 10px red; } 100% { opacity: 0.8; } }
+
         /* DYNAMIC TOUR STYLES */
         .tour-spotlight-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -218,8 +226,25 @@
         // --- CONFIGURATION ---
         const SERVICE_WALLET = "r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL";
         const SERVICE_FEE = "0.00001"; 
+        const HIGH_VALUE_THRESHOLD = 100; // XRP
 
-        // --- GEMINI AI HELPER (ENV KEY ONLY) ---
+        // --- TOUR DATA WITH SELECTORS ---
+        const LOGIN_TOUR_STEPS = [
+            { selector: "#login-header", title: "Welcome to Checkbook", text: "The ultimate tool for deferred payments and payroll on the XRPL. Let's get you set up." },
+            { selector: "#login-import-btn", title: "Existing Users", text: "Already have a key? Click 'Import JSON' to load your saved file instantly." },
+            { selector: "#secret-input", title: "Manual Entry", text: "Or paste your Secret (s...) or Mnemonic words directly here to connect." },
+            { selector: "#login-create-btn", title: "New Identity", text: "New here? Use this button to generate a secure 12/24 word phrase or seed." }
+        ];
+
+        const APP_TOUR_STEPS = [
+            { selector: "header", title: "Command Center", text: "You are online. Check your Balance here. Tap the address to switch between multiple wallets.", tab: "WRITE" },
+            { selector: "#batch-btn", title: "Batch Payroll Mode", text: "Sending Airdrops or Payroll? Click here to switch to CSV mode and pay multiple people at once.", tab: "WRITE" },
+            { selector: "#currency-select", title: "Asset Selection", text: "Use the dropdown to switch between XRP and Layer 2 Tokens (IOUs) for your checks.", tab: "WRITE" },
+            { selector: "#nav-manage", title: "Liquidity Control", text: "Go to MANAGE to see sent checks. You can VOID any uncashed check to instantly reclaim funds.", tab: "MANAGE" },
+            { selector: "#nav-inbox", title: "Receiving Funds", text: "The INBOX scans the ledger for checks sent TO you. Just click 'CASH' to deposit them.", tab: "INBOX" }
+        ];
+
+        // --- GEMINI AI HELPER ---
         const callGemini = async (prompt, systemInstruction = "") => {
             const apiKey = ""; // Runtime provided by environment
 
@@ -287,21 +312,24 @@
             </div>
         );
 
-        // --- TOUR DATA WITH SELECTORS ---
-        const LOGIN_TOUR_STEPS = [
-            { selector: "#login-header", title: "Welcome to Checkbook", text: "The ultimate tool for deferred payments and payroll on the XRPL. Let's get you set up." },
-            { selector: "#login-import-btn", title: "Existing Users", text: "Already have a key? Click 'Import JSON' to load your saved file instantly." },
-            { selector: "#secret-input", title: "Manual Entry", text: "Or paste your Secret (s...) or Mnemonic words directly here to connect." },
-            { selector: "#login-create-btn", title: "New Identity", text: "New here? Use this button to generate a secure 12/24 word phrase or seed." }
-        ];
-
-        const APP_TOUR_STEPS = [
-            { selector: "header", title: "Command Center", text: "You are online. Check your Balance here. Tap the address to switch between multiple wallets.", tab: "WRITE" },
-            { selector: "#batch-btn", title: "Batch Payroll Mode", text: "Sending Airdrops or Payroll? Click here to switch to CSV mode and pay multiple people at once.", tab: "WRITE" },
-            { selector: "#currency-select", title: "Asset Selection", text: "Use the dropdown to switch between XRP and Layer 2 Tokens (IOUs) for your checks.", tab: "WRITE" },
-            { selector: "#nav-manage", title: "Liquidity Control", text: "Go to MANAGE to see sent checks. You can VOID any uncashed check to instantly reclaim funds.", tab: "MANAGE" },
-            { selector: "#nav-inbox", title: "Receiving Funds", text: "The INBOX scans the ledger for checks sent TO you. Just click 'CASH' to deposit them.", tab: "INBOX" }
-        ];
+        // --- COMPONENTS: TOKEN AVATAR ---
+        const TokenIcon = ({ issuer, size=24 }) => {
+            const [error, setError] = useState(false);
+            const url = `https://xumm.app/avatar/${issuer}_200`;
+            
+            if (error || !issuer) {
+                return <div className={`bg-[#1a5c0a] rounded-full border border-[#39ff14] flex items-center justify-center font-bold text-[#39ff14] text-[8px]`} style={{width: size, height: size}}>?</div>;
+            }
+            return (
+                <img 
+                    src={url} 
+                    onError={() => setError(true)} 
+                    className="rounded-full border border-[#39ff14] bg-black object-cover" 
+                    style={{width: size, height: size}} 
+                    alt="Token"
+                />
+            );
+        };
 
         /* --- AUDIO SYSTEM --- */
         const useSound = () => {
@@ -406,6 +434,7 @@
 
             // Modals & Tools
             const [confirmModal, setConfirmModal] = useState(null); 
+            const [previewData, setPreviewData] = useState(null); // NEW: Transaction Preview State
             const [newWalletData, setNewWalletData] = useState(null);
             const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
             const [showAddWalletModal, setShowAddWalletModal] = useState(false);
@@ -413,8 +442,14 @@
             const [smartImportText, setSmartImportText] = useState("");
             const [aiProcessing, setAiProcessing] = useState(false);
             
+            // Transaction History State
+            const [txHistory, setTxHistory] = useState([]);
+            const [txMarker, setTxMarker] = useState(null);
+            const [historyLoading, setHistoryLoading] = useState(false);
+            const [historyFilter, setHistoryFilter] = useState("");
+
             // Tour State
-            const [tourType, setTourType] = useState(null); // 'login' | 'app' | null
+            const [tourType, setTourType] = useState(null); 
             const [tourStep, setTourStep] = useState(0);
             const [highlightRect, setHighlightRect] = useState(null);
 
@@ -460,9 +495,7 @@
             const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
 
             const addLog = (msg, type='info') => {
-                // Log to history
                 setLogs(p => [...p, { time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}), msg, type }]);
-                // Trigger Toast
                 addToast(msg, type);
                 if(type === 'error') sound.error();
             };
@@ -473,13 +506,9 @@
                 : null;
 
             // Define missing handlers
-            const handleAssetSelect = (e) => {
-                const idx = e.target.value;
-                if (idx !== "" && trustlines[idx]) {
-                    const asset = trustlines[idx];
-                    setIouCurrency(asset.currency);
-                    setIouIssuer(asset.account);
-                }
+            const handleAssetSelect = (t) => {
+               setIouCurrency(t.currency);
+               setIouIssuer(t.account);
             };
 
             const saveContact = () => {
@@ -490,6 +519,58 @@
                 setNewContactName("");
                 sound.success();
                 addLog("Contact Saved", "success");
+            };
+
+            const refreshBalance = async (silent = false) => {
+                if(!client || !wallet) return;
+                if(!silent) setLoading(true);
+                try {
+                    const rawBal = await client.getXrpBalance(wallet.address);
+                    // Prevent formatting errors by forcing float
+                    const fmtBal = parseFloat(rawBal).toFixed(2);
+                    setBalance(fmtBal);
+                    
+                    if(!silent) {
+                        addLog(`Balance Verified: ${fmtBal} XRP`, "success");
+                        addLog(`Node: ${network}`, "info");
+                        sound.success();
+                    }
+                } catch(e) {
+                    addLog("Balance Error: " + e.message, "error");
+                }
+                if(!silent) setLoading(false);
+            };
+
+            const fetchTxHistory = async (isLoadMore = false) => {
+                if (!client || !wallet) return;
+                setHistoryLoading(true);
+                try {
+                    const req = {
+                        command: "account_tx",
+                        account: wallet.address,
+                        limit: 20,
+                    };
+                    if (isLoadMore && txMarker) req.marker = txMarker;
+
+                    const res = await client.request(req);
+                    
+                    const newTx = res.result.transactions.map(t => ({
+                        hash: t.tx.hash,
+                        type: t.tx.TransactionType,
+                        date: (t.tx.date + 946684800) * 1000, // Ripple Epoch
+                        success: t.meta.TransactionResult === "tesSUCCESS",
+                        desc: t.tx.TransactionType === 'Payment' 
+                            ? (t.tx.Destination === wallet.address ? "Received" : "Sent") 
+                            : t.tx.TransactionType
+                    }));
+
+                    setTxHistory(prev => isLoadMore ? [...prev, ...newTx] : newTx);
+                    setTxMarker(res.result.marker);
+                    if(!isLoadMore) sound.success();
+                } catch (e) {
+                    addLog("History Error: " + e.message, "error");
+                }
+                setHistoryLoading(false);
             };
 
             const renderContacts = () => (
@@ -599,7 +680,14 @@
             };
 
             const fetchBalanceForWallet = async (cl, wObj) => {
-                try { return await cl.getXrpBalance(wObj.address); } catch (err) { if (err.message.includes("Account not found")) return "0 (INACTIVE)"; return "Err"; }
+                try { 
+                    const bal = await cl.getXrpBalance(wObj.address);
+                    // Ensure balance is formatted correctly immediately on fetch
+                    return parseFloat(bal).toFixed(2);
+                } catch (err) { 
+                    if (err.message.includes("Account not found")) return "0.00 (INACTIVE)"; 
+                    return "Error"; 
+                }
             };
 
             const activateWallet = async (wInstance, cl = client) => {
@@ -733,8 +821,60 @@
                 } catch(e) { addLog(e.message, "error"); setConfirmModal(null); } finally { setLoading(false); }
             };
 
-            const sendCheck = async () => {
-                sound.click(); if(!client) return; setLoading(true);
+            // --- TRANSACTION PREVIEW LOGIC ---
+            const initiateSingleCheck = () => {
+                sound.click();
+                if (!destAddress || !amount) { addLog("Missing Fields", "error"); return; }
+                const isHighValue = currencyType === 'XRP' && parseFloat(amount) > HIGH_VALUE_THRESHOLD;
+                
+                setPreviewData({
+                    type: 'SINGLE',
+                    to: destAddress,
+                    amount: amount,
+                    currency: currencyType === 'XRP' ? 'XRP' : decodeCurrency(iouCurrency),
+                    fee: '0.000012',
+                    serviceFee: SERVICE_FEE,
+                    warning: isHighValue ? `HIGH VALUE: ${amount} XRP` : null
+                });
+            };
+
+            const initiateBatchRun = () => {
+                sound.click();
+                const lines = batchList.split('\n').filter(l => l.trim());
+                if (lines.length === 0) { addLog("Batch Empty", "error"); return; }
+                
+                // Calculate totals
+                let totalAmt = 0;
+                lines.forEach(l => {
+                    const parts = l.split(',');
+                    if (parts[1]) totalAmt += parseFloat(parts[1]);
+                    else totalAmt += parseFloat(amount || 0);
+                });
+
+                setPreviewData({
+                    type: 'BATCH',
+                    count: lines.length,
+                    totalAmount: totalAmt.toFixed(4),
+                    currency: currencyType === 'XRP' ? 'XRP' : decodeCurrency(iouCurrency),
+                    fee: (0.000012 * lines.length).toFixed(6),
+                    serviceFee: (parseFloat(SERVICE_FEE) * lines.length).toFixed(5),
+                    warning: totalAmt > HIGH_VALUE_THRESHOLD && currencyType === 'XRP' ? `HIGH BATCH TOTAL: ${totalAmt} XRP` : null
+                });
+            };
+
+            const executeTransaction = async () => {
+                if(!previewData) return;
+                setPreviewData(null); // Close modal
+                
+                if (previewData.type === 'SINGLE') {
+                    await executeSingleCheck();
+                } else if (previewData.type === 'BATCH') {
+                    await executeBatchRun();
+                }
+            };
+
+            const executeSingleCheck = async () => {
+                if(!client) return; setLoading(true);
                 try {
                     let sendMax = currencyType === 'XRP' ? xrpl.xrpToDrops(amount) : { currency: iouCurrency, issuer: iouIssuer, value: amount };
                     const tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: destAddress.trim(), SendMax: sendMax };
@@ -745,9 +885,9 @@
                 } catch(e) { addLog(e.message, "error"); } setLoading(false);
             };
 
-            const runBatch = async () => {
-                sound.click(); if(!client || !wallet) return;
-                const lines = batchList.split('\n').filter(l => l.trim()); if(lines.length===0) return;
+            const executeBatchRun = async () => {
+                if(!client || !wallet) return;
+                const lines = batchList.split('\n').filter(l => l.trim());
                 setLoading(true); addLog(`Batch: ${lines.length} items`, "warn");
                 let sent = 0;
                 for(const line of lines) {
@@ -774,7 +914,7 @@
                     const prompt = `Extract all XRPL addresses (starting with 'r', alphanumeric, ~25-35 chars) and numeric amounts associated with them from the text below. Return ONLY a CSV list in the format: address,amount. Do not include markdown code blocks. If no amount is found for an address, use '0'. Text to parse:\n${smartImportText}`;
                     const result = await callGemini(prompt, "You are a specialized data extractor for XRPL transactions. Output only raw CSV data.");
                     
-                    const cleanResult = result.replace(/```csv|```/g, '').trim();
+                    const cleanResult = result.replace(/```csv/g, '').replace(/```/g, '').trim();
                     if(cleanResult && cleanResult.length > 5) {
                         setBatchList(cleanResult);
                         sound.magic();
@@ -906,6 +1046,50 @@
                     <ToastContainer toasts={toasts} removeToast={removeToast} />
                     {loading && <GlobalSpinner />}
 
+                    {/* TRANSACTION PREVIEW MODAL */}
+                    {previewData && (
+                        <div className="modal-overlay">
+                            <div className="hud-panel p-6 w-11/12 max-w-sm rounded-lg border-2 border-[#39ff14] bg-black relative overflow-hidden">
+                                <div className="absolute top-0 right-0 p-2">
+                                    <div className="w-2 h-2 rounded-full bg-[#39ff14] animate-pulse"></div>
+                                </div>
+                                <h3 className="text-lg font-bold text-[#39ff14] mb-4 text-center tracking-widest border-b border-[#1a5c0a] pb-2">
+                                    {previewData.type === 'BATCH' ? 'BATCH OPERATION' : 'TRANSACTION PREVIEW'}
+                                </h3>
+                                
+                                <div className="space-y-1 mb-4">
+                                    <div className="preview-row"><span className="preview-label">TYPE</span><span className="preview-val text-[#39ff14]">{previewData.type === 'BATCH' ? `BATCH CHECK (${previewData.count})` : 'SINGLE CHECK'}</span></div>
+                                    
+                                    {previewData.type === 'BATCH' ? (
+                                        <div className="preview-row"><span className="preview-label">TOTAL AMOUNT</span><span className="preview-val text-white">{previewData.totalAmount} {previewData.currency}</span></div>
+                                    ) : (
+                                        <>
+                                            <div className="preview-row"><span className="preview-label">RECIPIENT</span><span className="preview-val font-mono">{previewData.to.substring(0,8)}...</span></div>
+                                            <div className="preview-row"><span className="preview-label">AMOUNT</span><span className="preview-val text-xl">{previewData.amount} {previewData.currency}</span></div>
+                                        </>
+                                    )}
+
+                                    <div className="preview-row"><span className="preview-label">NETWORK FEE</span><span className="preview-val text-gray-400">~{previewData.fee} XRP</span></div>
+                                    <div className="preview-row"><span className="preview-label">SERVICE FEE</span><span className="preview-val text-gray-400">{previewData.serviceFee} XRP</span></div>
+                                    <div className="preview-row"><span className="preview-label">EST. TIME</span><span className="preview-val text-[#39ff14]">3-5 SECONDS</span></div>
+                                </div>
+
+                                {previewData.warning && (
+                                    <div className="risk-warning">
+                                        ⚠ {previewData.warning} ⚠
+                                    </div>
+                                )}
+
+                                <div className="flex gap-2 mt-6">
+                                    <button onClick={() => setPreviewData(null)} className="flex-1 border border-gray-600 text-gray-400 p-3 text-xs font-bold hover:text-white">ABORT</button>
+                                    <button onClick={executeTransaction} className="flex-1 bg-[#39ff14] text-black border border-[#39ff14] p-3 text-xs font-bold hover:bg-white flex justify-center items-center gap-2">
+                                        CONFIRM EXECUTION
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* CONFIRMATION MODAL */}
                     {confirmModal && (
                         <div className="modal-overlay">
@@ -920,7 +1104,10 @@
                                         <div className="border-t border-gray-700 pt-1 mt-1 text-[10px] text-center opacity-50">FEE PAID BY YOU (RECEIVER)</div>
                                     </div>
                                 ) : (
-                                    <p className="text-xs text-center mb-4 text-white">{loading ? "PROCESSING ON LEDGER..." : "You are about to VOID a check. This cannot be undone."}{confirmModal.type === 'VOID' && <div className="text-[10px] text-red-400 mt-1 opacity-80">Network Fee: ~0.000012 XRP</div>}</p>
+                                    <div className="text-xs text-center mb-4 text-white">
+                                        {loading ? "PROCESSING ON LEDGER..." : "You are about to VOID a check. This cannot be undone."}
+                                        {confirmModal.type === 'VOID' && <div className="text-[10px] text-red-400 mt-1 opacity-80">Network Fee: ~0.000012 XRP</div>}
+                                    </div>
                                 )}
                                 <div className="text-[10px] font-mono bg-red-900/30 p-2 mb-4 border border-red-500/50 break-all">ID: {confirmModal.id}</div>
                                 <div className="flex gap-2">
@@ -1007,9 +1194,9 @@
                             <span className="text-[8px] md:text-[10px] font-mono tracking-[0.3em] text-[#39ff14] opacity-60 energy-flicker" style={{animationDelay: '1.5s'}}>POWERED BY XMEME</span>
                         </div>
                         {wallet && (
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-right cursor-pointer hover:opacity-80 active:scale-95 transition" onClick={() => { sound.click(); setShowAccountSwitcher(!showAccountSwitcher); }}>
-                                <div className="text-xs font-mono text-[#39ff14] font-bold flex items-center justify-end gap-1">{balance} <span className="text-[8px]">XRP</span></div>
-                                <div className="text-[8px] opacity-50 font-mono truncate w-20 flex items-center justify-end gap-1">{wallet.address} ▼</div>
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-right cursor-pointer hover:opacity-80 active:scale-95 transition" onClick={() => { sound.click(); refreshBalance(); }}>
+                                <div className="text-xs font-mono text-[#39ff14] font-bold flex items-center justify-end gap-1" title="Click to Refresh">{balance} <span className="text-[8px]">XRP</span></div>
+                                <div className="text-[8px] opacity-50 font-mono truncate w-20 flex items-center justify-end gap-1" onClick={(e) => { e.stopPropagation(); setShowAccountSwitcher(!showAccountSwitcher); }}>{wallet.address} ▼</div>
                             </div>
                         )}
                     </header>
@@ -1034,9 +1221,21 @@
                                             <div className="w-1/3"><label className="text-[10px] opacity-70 block mb-1">CURRENCY</label><select id="currency-select" className="w-full p-2 h-[38px] font-mono text-sm" value={currencyType} onChange={e=>{setCurrencyType(e.target.value); if(e.target.value==='IOU' && trustlines.length===0) fetchTrustlines();}}><option value="XRP">XRP</option><option value="IOU">Layer 2 (Asset)</option></select></div>
                                         </div>
                                         {currencyType === 'IOU' && (
-                                            <div className="p-2 border border-[#1a5c0a] bg-black/30 space-y-2 animate-fadeIn">
-                                                <div className="flex gap-2"><select className="w-full p-2 text-xs font-mono bg-[#050505] border border-[#1a5c0a]" onChange={handleAssetSelect}><option value="">-- SELECT ASSET --</option>{trustlines.map((t,idx)=><option key={idx} value={idx}>{decodeCurrency(t.currency)} ({t.balance})</option>)}</select><button onClick={fetchTrustlines} className="px-3 border border-[#39ff14] text-[#39ff14] font-bold">↻</button></div>
-                                                <div className="text-[8px] opacity-50 mb-1">MANUAL OVERRIDE</div><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="CURRENCY CODE" value={decodeCurrency(iouCurrency)} readOnly /><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="ISSUER (r...)" value={iouIssuer} onChange={e=>setIouIssuer(e.target.value)} />
+                                            <div className="p-2 border border-[#1a5c0a] bg-black/30 space-y-2 animate-fadeIn max-h-40 overflow-y-auto custom-scroll">
+                                                <div className="text-[8px] opacity-50 mb-1">SELECT TOKEN ASSET</div>
+                                                {trustlines.map((t, idx) => (
+                                                    <div key={idx} onClick={() => handleAssetSelect(t)} className={`flex items-center gap-2 p-2 cursor-pointer border-b border-gray-800 hover:bg-[#1a5c0a]/30 ${iouCurrency === t.currency && iouIssuer === t.account ? 'bg-[#1a5c0a]/50 border-l-2 border-l-[#39ff14]' : ''}`}>
+                                                        <TokenIcon issuer={t.account} size={24} />
+                                                        <div className="flex-1">
+                                                            <div className="text-xs font-bold text-[#39ff14]">{decodeCurrency(t.currency)}</div>
+                                                            <div className="text-[8px] opacity-70 font-mono truncate w-24">{t.account}</div>
+                                                        </div>
+                                                        <div className="text-xs font-mono">{t.balance}</div>
+                                                    </div>
+                                                ))}
+                                                <div className="mt-2 pt-2 border-t border-gray-700">
+                                                    <div className="text-[8px] opacity-50 mb-1">MANUAL OVERRIDE</div><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="CURRENCY CODE" value={decodeCurrency(iouCurrency)} readOnly /><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="ISSUER (r...)" value={iouIssuer} onChange={e=>setIouIssuer(e.target.value)} />
+                                                </div>
                                             </div>
                                         )}
                                         <div>
@@ -1046,7 +1245,7 @@
                                             </label>
                                             <input className="w-full p-2 font-mono text-sm" placeholder="e.g. 'Lunch for team'" value={memo} onChange={e=>setMemo(e.target.value)} />
                                         </div>
-                                        <button onClick={isBatchMode ? runBatch : sendCheck} disabled={loading} className="w-full btn-action p-4 text-lg mt-4 shadow-[0_0_15px_rgba(57,255,20,0.2)]">{loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? "EXECUTE BATCH CHECKS" : "ISSUE CHECK")}
+                                        <button onClick={isBatchMode ? initiateBatchRun : initiateSingleCheck} disabled={loading} className="w-full btn-action p-4 text-lg mt-4 shadow-[0_0_15px_rgba(57,255,20,0.2)]">{loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? "EXECUTE BATCH CHECKS" : "ISSUE CHECK")}
                                             <span className="block text-[8px] opacity-60 font-normal mt-1">INCLUDES 0.00001 XRP SERVICE FEE</span>
                                         </button>
                                     </div>
@@ -1055,7 +1254,51 @@
                                 {activeTab === 'MANAGE' && (<div className="flex-1 flex flex-col overflow-hidden"><div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">OUTGOING CHECKS</span><button onClick={fetchChecks} className="text-[10px] border border-[#39ff14] px-2 py-1">REFRESH</button></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scroll">{activeChecks.map(c => (<div key={c.index} className="border border-[#1a5c0a] bg-black/40 p-3 rounded relative"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-[#39ff14]">{typeof c.SendMax === 'string' ? xrpl.dropsToXrp(c.SendMax) : c.SendMax.value}</span><button onClick={() => requestAction(c.index, 'VOID')} className="border border-red-500 text-red-500 text-[10px] px-2 py-1">VOID</button></div></div>))}</div></div>)}
                                 {activeTab === 'INBOX' && (<div className="flex-1 flex flex-col overflow-hidden"><div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">INCOMING CHECKS</span><button onClick={fetchIncomingChecks} className="text-[10px] border border-[#39ff14] px-2 py-1">SCAN</button></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scroll">{incomingChecks.map(c => (<div key={c.id} className="border border-[#39ff14] bg-[#0a1f0a]/60 p-3 rounded relative"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-white">{typeof c.amount === 'string' ? xrpl.dropsToXrp(c.amount) : c.amount.value}</span><button onClick={() => requestAction(c.id, 'CASH')} className="bg-[#39ff14] text-black font-bold text-[10px] px-3 py-1">CASH</button></div></div>))}</div></div>)}
                                 {activeTab === 'WALLET' && (<div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4"><div className="p-3 border border-[#39ff14] bg-black/60 rounded flex flex-col items-center"><div className="text-[10px] opacity-50 mb-1 w-full text-left">MY ADDRESS</div><QRCodeCanvas value={wallet.address} size={100} /><div className="text-xs font-mono break-all text-[#39ff14] mb-2 mt-2 text-center">{wallet.address}</div><button onClick={() => copyToClipboard(wallet.address)} className="w-full border border-[#1a5c0a] text-xs py-1">COPY</button></div><div className="flex gap-2"><button onClick={() => setGenType('select')} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">+ NEW WALLET</button><button onClick={() => setShowAccountSwitcher(true)} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">SWITCH</button></div></div>)}
-                                {activeTab === 'LOGS' && (<div className="flex-1 overflow-y-auto p-2 font-mono text-[10px] space-y-1 bg-black custom-scroll border-t border-[#1a5c0a]">{logs.map((l, i) => (<div key={i} className="p-1 border-l-2 pl-2 border-gray-500 text-gray-400"><span className="opacity-50 mr-2">[{l.time}]</span>{l.msg}</div>))}<div ref={logEndRef} /></div>)}
+                                {activeTab === 'LOGS' && (
+                                    <div className="flex-1 flex flex-col overflow-hidden bg-black">
+                                        <div className="h-1/3 border-b border-[#1a5c0a] overflow-y-auto p-2 font-mono text-[10px] space-y-1 custom-scroll">
+                                            <div className="text-[8px] opacity-50 sticky top-0 bg-black w-full pb-1 border-b border-gray-800 mb-1">SYSTEM LOGS</div>
+                                            {logs.map((l, i) => (<div key={i} className="p-1 border-l-2 pl-2 border-gray-500 text-gray-400"><span className="opacity-50 mr-2">[{l.time}]</span>{l.msg}</div>))}
+                                            <div ref={logEndRef} />
+                                        </div>
+                                        <div className="flex-1 flex flex-col overflow-hidden">
+                                            <div className="p-2 bg-[#050505] border-b border-[#1a5c0a] flex items-center gap-2">
+                                                <span className="text-[10px] font-bold text-[#39ff14]">LEDGER HISTORY</span>
+                                                <input className="flex-1 p-1 text-[10px] bg-black border border-gray-700" placeholder="Filter by Hash, Type..." value={historyFilter} onChange={e=>setHistoryFilter(e.target.value)} />
+                                                <button onClick={()=>fetchTxHistory(false)} disabled={historyLoading} className="px-2 py-1 bg-[#1a5c0a] text-white text-[10px] font-bold">FETCH</button>
+                                            </div>
+                                            <div className="flex-1 overflow-y-auto custom-scroll relative">
+                                                <table className="w-full text-left border-collapse">
+                                                    <thead className="sticky top-0 bg-black z-10 text-[8px] text-gray-500">
+                                                        <tr>
+                                                            <th className="p-2 border-b border-gray-800">TYPE</th>
+                                                            <th className="p-2 border-b border-gray-800">DESC</th>
+                                                            <th className="p-2 border-b border-gray-800">DATE</th>
+                                                            <th className="p-2 border-b border-gray-800 text-right">HASH</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="font-mono text-[10px]">
+                                                        {txHistory.filter(t => !historyFilter || JSON.stringify(t).toLowerCase().includes(historyFilter.toLowerCase())).map((tx, i) => (
+                                                            <tr key={i} className="border-b border-gray-900 hover:bg-[#1a5c0a]/20">
+                                                                <td className={`p-2 font-bold ${tx.success ? 'text-[#39ff14]' : 'text-red-500'}`}>{tx.type}</td>
+                                                                <td className="p-2 text-white">{tx.desc}</td>
+                                                                <td className="p-2 text-gray-400">{new Date(tx.date).toLocaleDateString()}</td>
+                                                                <td className="p-2 text-right"><a href={`https://xrpscan.com/tx/${tx.hash}`} target="_blank" className="text-[#39ff14] hover:underline">VIEW &rarr;</a></td>
+                                                            </tr>
+                                                        ))}
+                                                        {historyLoading && <tr><td colSpan="4" className="p-4 text-center text-[#39ff14] animate-pulse">LOADING DATA...</td></tr>}
+                                                    </tbody>
+                                                </table>
+                                                {txHistory.length > 0 && !historyLoading && (
+                                                    <div className="p-2 text-center">
+                                                        <button onClick={()=>fetchTxHistory(true)} className="text-[10px] border border-[#39ff14] px-4 py-2 text-[#39ff14] hover:bg-[#39ff14] hover:text-black transition">LOAD OLDER RECORDS</button>
+                                                    </div>
+                                                )}
+                                                {txHistory.length === 0 && !historyLoading && <div className="p-8 text-center text-gray-600 text-xs">NO HISTORY LOADED</div>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </main>
