@@ -189,6 +189,13 @@
             from { box-shadow: 0 0 20px #39ff14; transform: scale(1); }
             to { box-shadow: 0 0 40px #39ff14; transform: scale(1.02); }
         }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .animate-shake { animation: shake 0.3s ease-in-out; }
+
         .tour-tooltip-box {
             position: absolute;
             background: #000;
@@ -198,6 +205,7 @@
             z-index: 2010;
             box-shadow: 0 0 20px rgba(0,0,0,0.8);
             pointer-events: none; /* Let clicks pass through tooltip */
+            transition: all 0.3s ease-out;
         }
         .tour-tooltip-box.bottom { margin-top: 20px; }
         .tour-tooltip-box.top { margin-bottom: 20px; transform: translateY(-100%); }
@@ -221,9 +229,8 @@
         const SERVICE_WALLET = "r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL";
         const SERVICE_FEE = "0.00001"; 
         const HIGH_VALUE_THRESHOLD = 100; // XRP
-        const TOUR_KEY = "xrpl_interactive_tour_v5"; // Key
-        const INTERNAL_INTRO_KEY = "xrpl_internal_intro_v5"; 
-        const SPLASH_KEY = "xrpl_splash_seen_v2"; // Key
+        const TOUR_KEY = "xrpl_interactive_tour_v7_final"; // FINAL KEY FOR TUTORIAL
+        // NOTE: No SPLASH_KEY, because splash plays every time on load.
         
         const INTERNAL_VIDEO_URL = "https://ipfs.io/ipfs/QmYYDVbVMQZuVFpApWva8ujFNiPLBfa9RkCJX9wDmktgkt";
         const SPLASH_VIDEO_URL = "https://ipfs.io/ipfs/QmeQ8MrFxQgZjFFBZeMBASXtJg95VATsi3sqK821B2LNAT";
@@ -245,7 +252,7 @@
                 selector: "#nav-inbox", 
                 text: "Tap INBOX. This is where you find incoming checks to cash.", 
                 tab: "INBOX",
-                action: "switch" // Expects tab switch
+                action: "switch" 
             },
             { 
                 selector: "#scan-btn", 
@@ -264,6 +271,24 @@
                 text: "Finally, tap WALLET to see your address and QR code.", 
                 tab: "WALLET",
                 action: "switch"
+            },
+            {
+                selector: "#nav-logs",
+                text: "Tap LOGS to see your full transaction history and ledger audit trail.",
+                tab: "LOGS",
+                action: "switch"
+            },
+            {
+                selector: "#action-btn",
+                text: "Tap the Main Action button to execute transactions.",
+                tab: "WRITE",
+                action: "click"
+            },
+            {
+                selector: "#header-identity",
+                text: "Tap your address here to Switch Wallets or Refresh Balance.",
+                tab: "WRITE",
+                action: "click"
             }
         ];
 
@@ -449,6 +474,7 @@
             const [isWalletActive, setIsWalletActive] = useState(true); 
             const [allWallets, setAllWallets] = useState([]); 
             const [balance, setBalance] = useState("---");
+            const [loginError, setLoginError] = useState(null); // NULL = No error state
             
             const [network] = useState("wss://xrplcluster.com");
             const [seed, setSeed] = useState("");
@@ -482,7 +508,7 @@
             const [tourRect, setTourRect] = useState(null);
             
             // TWO STAGE INTROS
-            const [showSplash, setShowSplash] = useState(false); // Cold Boot
+            const [showSplash, setShowSplash] = useState(true); // Cold Boot: ALWAYS TRUE Initially
             const [showInternalIntro, setShowInternalIntro] = useState(false); // Post Login
 
             const internalIntroCheckedRef = useRef(false); // Ref to track intro status per session
@@ -516,25 +542,21 @@
             const fileInputRef = useRef(null);
             const logEndRef = useRef(null);
 
-            // --- MOUNT EFFECT: CHECK SPLASH ---
+            // --- MOUNT EFFECT: CHECK CONTACTS ---
             useEffect(() => {
                 const saved = localStorage.getItem('xrpl_address_book');
                 if (saved) { try { setContacts(JSON.parse(saved) || {}); } catch (e) {} }
-
-                // Check Splash Status (Cold Boot)
-                if (!localStorage.getItem(SPLASH_KEY)) {
-                    setShowSplash(true);
-                }
+                // Splash is defaulted to TRUE in useState, so it plays on every hard reload.
             }, []);
 
             useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
             // --- INTRO & TOUR FLOW LOGIC ---
             
-            // 0. Handle Splash Completion
+            // 0. Handle Splash Completion (Startup Screen)
             const handleSplashComplete = () => {
                 setShowSplash(false);
-                localStorage.setItem(SPLASH_KEY, 'seen');
+                // We do NOT save a flag here, because we want it every time the app reloads
             };
 
             // 1. Trigger Internal Intro logic AFTER login is complete
@@ -543,35 +565,31 @@
                 if (internalIntroCheckedRef.current) return;
                 
                 // STORAGE GUARD: Check if internal intro has EVER been seen
-                const introSeen = localStorage.getItem(INTERNAL_INTRO_KEY);
+                // Using a persistent key for the tutorial part
+                const tourSeen = localStorage.getItem(TOUR_KEY);
                 
-                if (!introSeen) {
+                if (!tourSeen) {
                     // Show Internal Intro if never seen
                     setShowInternalIntro(true); 
-                } else if (!localStorage.getItem(TOUR_KEY)) {
-                    // Skip Intro, Show Tour if Intro seen but Tour not
-                    startTour();
-                }
+                } 
                 
-                // Mark this session as having checked the intro
+                // Mark this session as having checked the intro so it doesn't run again on wallet switch
                 internalIntroCheckedRef.current = true;
             };
 
             // 2. Handle Internal Intro Completion
             const handleInternalIntroComplete = () => {
                 setShowInternalIntro(false);
-                localStorage.setItem(INTERNAL_INTRO_KEY, 'seen');
                 // Immediately start tour after video
                 startTour();
             };
 
             // 3. Manual Reset (The '?' Button)
-            // UPDATED: Now only resets the Tutorial Sequence (Checkbook Video + Tooltips), NOT Splash.
+            // Resets ONLY the Tutorial Sequence (Checkbook Video + Tooltips), NOT Splash.
             const replayTutorialSequence = () => {
                 sound.click();
                 
-                // Clear only internal flags
-                localStorage.removeItem(INTERNAL_INTRO_KEY);
+                // Clear flags to allow replay
                 localStorage.removeItem(TOUR_KEY);
                 
                 // Allow replay in session
@@ -582,6 +600,30 @@
             };
 
             // --- TOUR HIGHLIGHTING LOGIC ---
+            const waitForElement = (selector, retries = 0) => {
+                const el = document.querySelector(selector);
+                if (el) {
+                    // Found it
+                    el.classList.add('tour-highlighted-element');
+                    const rect = el.getBoundingClientRect();
+                    setTourRect(rect);
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;
+                }
+                
+                // Retry up to 10 times (2 seconds)
+                if (retries < 20) {
+                    setTimeout(() => waitForElement(selector, retries + 1), 100);
+                } else {
+                    // Element never showed up, skip step
+                    if (tourStep < TOUR_STEPS.length - 1) {
+                         setTourStep(s => s + 1);
+                    } else {
+                        endTour();
+                    }
+                }
+            };
+
             useEffect(() => {
                 document.querySelectorAll('.tour-highlighted-element').forEach(el => {
                     el.classList.remove('tour-highlighted-element');
@@ -594,15 +636,15 @@
                         return;
                     }
 
+                    // Force tab switch logic
+                    if (step.tab && activeTab !== step.tab) {
+                        setActiveTab(step.tab);
+                    }
+
+                    // Wait a moment for DOM to paint
                     setTimeout(() => {
-                        const el = document.querySelector(step.selector);
-                        if (el) {
-                            el.classList.add('tour-highlighted-element');
-                            const rect = el.getBoundingClientRect();
-                            setTourRect(rect);
-                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }
-                    }, 100);
+                        waitForElement(step.selector);
+                    }, 200);
                 }
             }, [tourActive, tourStep, activeTab, wallet, showInternalIntro]);
 
@@ -611,16 +653,37 @@
                 if (!tourActive || showInternalIntro) return;
 
                 const handleTourClick = (e) => {
+                    // Allow clicks on the tooltip buttons (Exit)
+                    if (e.target.closest('.tour-tooltip-box')) return;
+
                     const step = TOUR_STEPS[tourStep];
                     if (!step) return;
                     
                     const targetEl = document.querySelector(step.selector);
+                    
                     if (targetEl && (e.target === targetEl || targetEl.contains(e.target))) {
-                        sound.click();
-                        if (tourStep < TOUR_STEPS.length - 1) {
-                            setTourStep(s => s + 1);
-                        } else {
-                            endTour();
+                        // Correct click
+                        // Allow bubble so action happens
+                        // Advance tour
+                        setTimeout(() => {
+                            sound.click();
+                            if (tourStep < TOUR_STEPS.length - 1) {
+                                setTourStep(s => s + 1);
+                            } else {
+                                endTour();
+                            }
+                        }, 50);
+                    } else {
+                        // WRONG CLICK - BLOCK IT
+                        e.stopPropagation();
+                        e.preventDefault();
+                        
+                        // Shake feedback
+                        const tooltip = document.querySelector('.tour-tooltip-box');
+                        if(tooltip) {
+                            tooltip.classList.remove('animate-shake');
+                            void tooltip.offsetWidth; // trigger reflow
+                            tooltip.classList.add('animate-shake');
                         }
                     }
                 };
@@ -639,13 +702,13 @@
                 setTourActive(false);
                 setTourRect(null);
                 document.querySelectorAll('.tour-highlighted-element').forEach(el => el.classList.remove('tour-highlighted-element'));
-                localStorage.setItem(TOUR_KEY, 'seen');
+                localStorage.setItem(TOUR_KEY, 'seen'); // Save persistence HERE
                 sound.success();
             };
 
             // --- TOAST LOGIC ---
             const addToast = (msg, type = 'info') => {
-                const id = Date.now() + Math.random(); // Fix for duplicate keys
+                const id = Date.now() + Math.random();
                 setToasts(prev => [...prev, { id, msg, type }]);
                 setTimeout(() => {
                     setToasts(prev => prev.filter(t => t.id !== id));
@@ -851,14 +914,30 @@
 
             const activateWallet = async (wInstance, cl = client, isSwitch = false) => {
                 setLoading(true);
+                setLoginError(null); // Clear errors on start
                 let success = false;
                 try {
                     let activeClient = cl;
-                    // Reuse client if possible, or create new if disconnected
-                    if (!activeClient || !activeClient.isConnected()) {
-                        activeClient = new xrpl.Client(network); 
-                        await activeClient.connect(); 
-                        setClient(activeClient);
+                    // Force a fresh client if connecting to a new wallet or if disconnected
+                    // This prevents state bleed between wallet sessions
+                    if (!activeClient || !activeClient.isConnected() || isSwitch) {
+                        try {
+                            // Disconnect old if exists
+                            if (activeClient && activeClient.isConnected()) {
+                                 await activeClient.disconnect();
+                            }
+                            // New connection
+                            activeClient = new xrpl.Client(network); 
+                            await activeClient.connect(); 
+                            setClient(activeClient);
+                        } catch (e) {
+                             // First attempt failed? Try once more
+                             console.warn("Retrying connection...");
+                             await new Promise(r => setTimeout(r, 1000));
+                             activeClient = new xrpl.Client(network);
+                             await activeClient.connect();
+                             setClient(activeClient);
+                        }
                     }
                     
                     const bal = await fetchBalanceForWallet(activeClient, wInstance);
@@ -874,48 +953,97 @@
                         if(exists) return prev.map(x => x.wallet.address === wInstance.address ? { ...x, balance: bal } : x);
                         return [...prev, { wallet: wInstance, balance: bal }];
                     });
-                    setTrustlines([]); setActiveChecks([]); setIncomingChecks([]); setRecentTransfers([]);
+                    
+                    // Clean state
+                    setTrustlines([]); 
+                    setActiveChecks([]); 
+                    setIncomingChecks([]); 
+                    setRecentTransfers([]);
                     sound.modernLogin(); 
                     addLog(`Active: ${wInstance.address.substring(0,8)}...`, "success");
                     setRequestQR(wInstance.address); 
                     
-                    success = true;
-
+                    // Close Modals ONLY on success
+                    setShowAddWalletModal(false); 
+                    setShowAccountSwitcher(false); 
+                    setGenType(null);
+                    
                     // Trigger Flow only if NOT switching (Cold boot or first login)
                     if (!isSwitch) {
                         setTimeout(handlePostLoginFlow, 800);
                     }
+                    
+                    success = true;
 
                 } catch (e) { 
-                    addLog("Connection Error: " + e.message, "error"); 
+                    const errText = e.message || "Connection Failed";
+                    // Map common errors to human readable
+                    let friendlyError = errText;
+                    if (errText.includes("checksum")) friendlyError = "Invalid Checksum: Check your words.";
+                    else if (errText.includes("word list")) friendlyError = "Invalid Word: Check spelling.";
+                    else if (errText.includes("invalid mnemonic")) friendlyError = "Invalid Mnemonic Phrase.";
+
+                    setLoginError(friendlyError);
+                    addLog(friendlyError, "error"); 
                 } finally { 
                     setLoading(false); 
-                    // ONLY close the modal if connection was successful
-                    if (success) {
-                        setShowAddWalletModal(false); 
-                        setShowAccountSwitcher(false); 
-                        setGenType(null);
-                    }
                 }
             };
 
             const loadWalletFromInput = (inputOverride) => {
                 sound.click();
+                setLoginError(null); // Clear previous errors
                 const input = inputOverride || seed.trim();
                 
-                if (!input) return addLog("Enter Key", "error");
+                if (!input) {
+                     setLoginError("Please enter a Secret Key");
+                     return;
+                }
+
+                // Pre-flight check: Mnemonic length
+                if (input.includes(' ')) {
+                    const wordCount = input.split(/[\s\n]+/).filter(x => x).length;
+                    if (wordCount !== 12 && wordCount !== 24) {
+                        setLoginError(`Non-Standard Length (${wordCount} words). Standard is 12 or 24.`);
+                        return;
+                    }
+                }
+                
                 try {
                     let w;
-                    if (input.startsWith('{')) {
-                        const d = JSON.parse(input);
-                        const key = d.seed || d.secret || d.privateKey || d.mnemonic || d.master_seed;
-                        if (!key) throw new Error("No valid key");
-                        if (key.includes(' ')) w = xrpl.Wallet.fromMnemonic(key); else w = xrpl.Wallet.fromSeed(key);
+                    // Try parsing as JSON first
+                    if (input.trim().startsWith('{')) {
+                        try {
+                             const d = JSON.parse(input);
+                             // Check multiple common key fields
+                             const key = d.seed || d.secret || d.privateKey || d.mnemonic || d.master_seed || d.master_key;
+                             if (!key) throw new Error("JSON missing 'seed' or 'secret' field");
+                             
+                             if (key.includes(' ')) w = xrpl.Wallet.fromMnemonic(key); 
+                             else w = xrpl.Wallet.fromSeed(key);
+                        } catch(jsonErr) {
+                             throw new Error("Invalid JSON File");
+                        }
                     } else if (input.includes(' ')) {
                         w = xrpl.Wallet.fromMnemonic(input.split(/[\s\n]+/).filter(x => x).join(' '));
-                    } else { w = xrpl.Wallet.fromSeed(input); }
-                    if(w) activateWallet(w);
-                } catch (e) { addLog("Invalid Key format", "error"); }
+                    } else { 
+                        w = xrpl.Wallet.fromSeed(input); 
+                    }
+                    
+                    if(w) {
+                         activateWallet(w);
+                    } else {
+                         throw new Error("Could not derive wallet");
+                    }
+                } catch (e) { 
+                    let msg = e.message;
+                    // Enhanced mapping
+                    if (msg.includes("checksum")) msg = "Invalid Checksum: Check word order.";
+                    else if (msg.includes("word list")) msg = "Invalid Word found.";
+                    
+                    setLoginError(msg);
+                    addLog("Invalid Key", "error"); 
+                }
             };
 
             const generateNewWallet = (type) => {
@@ -980,8 +1108,6 @@
 
             const fetchIncomingData = async () => {
                 if(!client || !wallet) return; setLoading(true); addLog("Scanning...", "info");
-                // Pre-fetch trustlines to ensure they are available for check detection
-                await fetchTrustlines();
                 try {
                     const res = await client.request({ command: "account_tx", account: wallet.address, limit: 100 });
                     
@@ -1263,12 +1389,34 @@
                                     setSeed(content); 
                                     sound.success();
                                     // FORCE CONNECT with the content immediately
-                                    loadWalletFromInput(content); 
+                                    // BYPASSES the manual input logic to avoid validation issues with JSON content
+                                    try {
+                                        const d = JSON.parse(content);
+                                        const key = d.seed || d.secret || d.privateKey || d.mnemonic || d.master_seed || d.master_key;
+                                        if (!key) throw new Error("JSON missing key");
+                                        let w;
+                                        if (key.includes(' ')) w = xrpl.Wallet.fromMnemonic(key);
+                                        else w = xrpl.Wallet.fromSeed(key);
+                                        
+                                        if(w) activateWallet(w);
+                                    } catch(err) {
+                                        setLoginError("Invalid JSON File");
+                                    }
                                 }; 
                                 r.readAsText(e.target.files[0]); 
+                                e.target.value = ''; // Reset input
                             }}/>
                             <button id="login-import-btn" onClick={()=>fileInputRef.current.click()} className="w-full mb-3 border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold border-dashed hover:bg-[#39ff14] hover:text-black transition uppercase">📂 Import JSON</button>
                             <textarea id="secret-input" placeholder="ENTER SECRET (s...), 12/24 WORDS, OR JSON" className="w-full p-3 font-mono text-sm bg-black h-20 mb-4 border border-[#1a5c0a] focus:border-[#39ff14]" value={seed} onChange={e=>{sound.type(); setSeed(e.target.value);}} />
+                            
+                            {/* ERROR DISPLAY AREA */}
+                            {loginError && (
+                                <div className="mb-4 bg-red-600 border-2 border-red-800 p-3 rounded text-white font-bold text-center animate-shake shadow-[0_0_20px_red] z-50 relative">
+                                    <div className="text-xl mb-1">⚠️ ERROR</div>
+                                    <div className="text-sm font-mono">{loginError}</div>
+                                </div>
+                            )}
+
                             <div className="flex gap-2 mb-4">
                                 {wallet && (<button onClick={()=>setShowAddWalletModal(false)} className="flex-1 border border-red-500 text-red-500 p-4 text-lg font-bold hover:bg-red-900/30">CANCEL</button>)}
                                 <button id="login-connect-btn" onClick={() => loadWalletFromInput()} disabled={loading} className="flex-1 btn-action p-4 text-lg shadow-[0_0_15px_rgba(57,255,20,0.3)]">{loading ? "INITIALIZING..." : "CONNECT"}</button>
@@ -1509,7 +1657,7 @@
                     )}
 
                     {/* HEADER */}
-                    <header className="shrink-0 relative flex justify-between items-center p-4 border-b border-[#39ff14] bg-black/80 backdrop-blur-sm z-20 min-h-[85px]">
+                    <header className="shrink-0 relative flex justify-between items-center p-4 border-b border-[#39ff14] bg-black/80 backdrop-blur-sm z-20 min-h-[85px]" id="header-identity">
                         <div className="flex flex-col z-10">
                             <span className="text-[10px] md:text-xs font-mono tracking-[0.2em] text-[#39ff14] opacity-80 energy-flicker mb-1">XRPMAN PRODUCTIONS</span>
                             <h1 className="text-2xl md:text-3xl font-bold tracking-tighter leading-none neon-text text-neon-pulse mb-1">XRPL CHECKBOOK</h1>
@@ -1576,7 +1724,7 @@
                                             <label className="text-[10px] opacity-70 block mb-1">MEMO</label>
                                             <input className="w-full p-2 font-mono text-sm" placeholder="e.g. 'Lunch for team'" value={memo} onChange={e=>setMemo(e.target.value)} />
                                         </div>
-                                        <button onClick={isBatchMode ? initiateBatchRun : initiateTransaction} disabled={loading} className={`w-full btn-action p-4 text-lg mt-4 ${paymentMode==='PAYMENT' ? 'border-[#a855f7] text-[#d8b4fe] hover:bg-[#a855f7] hover:text-white' : 'shadow-[0_0_15px_rgba(57,255,20,0.2)]'}`}>
+                                        <button id="action-btn" onClick={isBatchMode ? initiateBatchRun : initiateTransaction} disabled={loading} className={`w-full btn-action p-4 text-lg mt-4 ${paymentMode==='PAYMENT' ? 'border-[#a855f7] text-[#d8b4fe] hover:bg-[#a855f7] hover:text-white' : 'shadow-[0_0_15px_rgba(57,255,20,0.2)]'}`}>
                                             {loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? `EXECUTE BATCH ${paymentMode}S` : (paymentMode==='CHECK' ? "ISSUE CHECK" : "SEND PAYMENT"))}
                                             <span className="block text-[8px] opacity-60 font-normal mt-1">{paymentMode==='CHECK' ? 'RECEIVER MUST CASH' : 'IMMEDIATE TRANSFER'}</span>
                                         </button>
@@ -1693,14 +1841,14 @@
                             <button id="nav-manage" className={`tab-btn ${activeTab==='MANAGE'?'active':''}`} onClick={()=>{sound.click();setActiveTab('MANAGE');fetchChecks()}}>MANAGE</button>
                             <button id="nav-inbox" className={`tab-btn ${activeTab==='INBOX'?'active':''}`} onClick={()=>{sound.click();setActiveTab('INBOX');fetchIncomingData()}}>INBOX</button>
                             <button id="nav-wallet" className={`tab-btn ${activeTab==='WALLET'?'active':''}`} onClick={()=>{sound.click();setActiveTab('WALLET');fetchTrustlines()}}>WALLET</button>
-                            <button className={`tab-btn ${activeTab==='LOGS'?'active':''}`} onClick={()=>{sound.click();setActiveTab('LOGS');fetchTxHistory()}}>LOGS</button>
+                            <button id="nav-logs" className={`tab-btn ${activeTab==='LOGS'?'active':''}`} onClick={()=>{sound.click();setActiveTab('LOGS');fetchTxHistory()}}>LOGS</button>
                             <button className="tab-btn text-red-500 hover:bg-red-900/20" onClick={()=>{ if(confirm("Disconnect Session?")) { setWallet(null); setSeed(""); setBalance("---"); setAllWallets([]); sound.click(); }}}>EXIT</button>
                         </nav>
                     )}
 
                     {/* Reset Button (Question Mark) */}
                     {wallet && (
-                       <div className="fixed bottom-16 right-4 w-8 h-8 bg-[#39ff14] text-black rounded-full flex items-center justify-center font-bold text-sm cursor-pointer shadow-[0_0_15px_#39ff14] z-40 hover:scale-110 transition" onClick={replayTutorialSequence} title="Replay Intro">?</div>
+                       <div className="fixed bottom-16 right-4 w-8 h-8 bg-[#39ff14] text-black rounded-full flex items-center justify-center font-bold text-sm cursor-pointer shadow-[0_0_15px_#39ff14] z-40 hover:scale-110 transition" onClick={replayTutorialSequence} title="Help / Replay Tutorial">?</div>
                     )}
                 </div>
             );
