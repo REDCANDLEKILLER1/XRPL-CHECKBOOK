@@ -229,8 +229,9 @@
         const SERVICE_WALLET = "r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL";
         const SERVICE_FEE = "0.00001"; 
         const HIGH_VALUE_THRESHOLD = 100; // XRP
-        const TOUR_KEY = "xrpl_interactive_tour_v7_final"; // FINAL KEY FOR TUTORIAL
-        // NOTE: No SPLASH_KEY, because splash plays every time on load.
+        const TOUR_KEY = "xrpl_interactive_tour_v6"; // Key
+        const INTERNAL_INTRO_KEY = "xrpl_internal_intro_v5"; 
+        const SPLASH_KEY = "xrpl_splash_seen_v2"; // Key
         
         const INTERNAL_VIDEO_URL = "https://ipfs.io/ipfs/QmYYDVbVMQZuVFpApWva8ujFNiPLBfa9RkCJX9wDmktgkt";
         const SPLASH_VIDEO_URL = "https://ipfs.io/ipfs/QmeQ8MrFxQgZjFFBZeMBASXtJg95VATsi3sqK821B2LNAT";
@@ -508,7 +509,7 @@
             const [tourRect, setTourRect] = useState(null);
             
             // TWO STAGE INTROS
-            const [showSplash, setShowSplash] = useState(true); // Cold Boot: ALWAYS TRUE Initially
+            const [showSplash, setShowSplash] = useState(false); // Cold Boot
             const [showInternalIntro, setShowInternalIntro] = useState(false); // Post Login
 
             const internalIntroCheckedRef = useRef(false); // Ref to track intro status per session
@@ -542,21 +543,27 @@
             const fileInputRef = useRef(null);
             const logEndRef = useRef(null);
 
-            // --- MOUNT EFFECT: CHECK CONTACTS ---
+            // --- MOUNT EFFECT: CHECK SPLASH ---
             useEffect(() => {
                 const saved = localStorage.getItem('xrpl_address_book');
                 if (saved) { try { setContacts(JSON.parse(saved) || {}); } catch (e) {} }
-                // Splash is defaulted to TRUE in useState, so it plays on every hard reload.
+
+                // Check Splash Status (Cold Boot)
+                // Always Play Splash on Full Reload if not seen this session logic removed
+                // Actually, request was "Just the first time people open it." (Session/Browser cache)
+                if (!localStorage.getItem(SPLASH_KEY)) {
+                    setShowSplash(true);
+                }
             }, []);
 
             useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
             // --- INTRO & TOUR FLOW LOGIC ---
             
-            // 0. Handle Splash Completion (Startup Screen)
+            // 0. Handle Splash Completion
             const handleSplashComplete = () => {
                 setShowSplash(false);
-                // We do NOT save a flag here, because we want it every time the app reloads
+                localStorage.setItem(SPLASH_KEY, 'seen');
             };
 
             // 1. Trigger Internal Intro logic AFTER login is complete
@@ -565,31 +572,35 @@
                 if (internalIntroCheckedRef.current) return;
                 
                 // STORAGE GUARD: Check if internal intro has EVER been seen
-                // Using a persistent key for the tutorial part
-                const tourSeen = localStorage.getItem(TOUR_KEY);
+                const introSeen = localStorage.getItem(INTERNAL_INTRO_KEY);
                 
-                if (!tourSeen) {
+                if (!introSeen) {
                     // Show Internal Intro if never seen
                     setShowInternalIntro(true); 
-                } 
+                } else if (!localStorage.getItem(TOUR_KEY)) {
+                    // Skip Intro, Show Tour if Intro seen but Tour not
+                    startTour();
+                }
                 
-                // Mark this session as having checked the intro so it doesn't run again on wallet switch
+                // Mark this session as having checked the intro
                 internalIntroCheckedRef.current = true;
             };
 
             // 2. Handle Internal Intro Completion
             const handleInternalIntroComplete = () => {
                 setShowInternalIntro(false);
+                localStorage.setItem(INTERNAL_INTRO_KEY, 'seen');
                 // Immediately start tour after video
                 startTour();
             };
 
             // 3. Manual Reset (The '?' Button)
-            // Resets ONLY the Tutorial Sequence (Checkbook Video + Tooltips), NOT Splash.
+            // UPDATED: Now only resets the Tutorial Sequence (Checkbook Video + Tooltips), NOT Splash.
             const replayTutorialSequence = () => {
                 sound.click();
                 
-                // Clear flags to allow replay
+                // Clear only internal flags
+                localStorage.removeItem(INTERNAL_INTRO_KEY);
                 localStorage.removeItem(TOUR_KEY);
                 
                 // Allow replay in session
@@ -1750,13 +1761,15 @@
                                                  <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-widest mt-4">RECENT TRANSFERS RECEIVED</div>
                                                  {recentTransfers.length === 0 && <div className="text-[10px] opacity-30 italic">No recent direct payments.</div>}
                                                  {recentTransfers.map((tx, i) => (
-                                                     <div key={i} className="border border-gray-800 bg-gray-900/40 p-2 rounded mb-1 flex justify-between items-center">
+                                                     <div onClick={() => window.open(`https://xrpscan.com/tx/${tx.hash}`, '_blank')} key={i} className="border border-gray-800 bg-gray-900/40 p-2 rounded mb-1 flex justify-between items-center cursor-pointer hover:bg-gray-800 group relative">
                                                          <div>
-                                                             <div className="text-[#39ff14] font-bold text-sm">{typeof tx.amount === 'string' ? xrpl.dropsToXrp(tx.amount) : tx.amount.value} {typeof tx.amount === 'string' ? 'XRP' : tx.amount.currency}</div>
+                                                             <div className="text-[#39ff14] font-bold text-sm">{typeof tx.amount === 'string' ? xrpl.dropsToXrp(tx.amount) : tx.amount.value} {typeof tx.amount === 'string' ? 'XRP' : decodeCurrency(tx.amount.currency)}</div>
                                                              {tx.memo && <div className="text-[9px] text-[#d8b4fe] italic">"{tx.memo}"</div>}
                                                              <div className="text-[8px] text-gray-500 font-mono">{new Date(tx.date).toLocaleDateString()} from {tx.sender.substring(0,4)}...</div>
                                                          </div>
-                                                         <div className="text-[8px] text-gray-500">DIRECT</div>
+                                                         <div className="text-[8px] text-gray-500 flex items-center gap-1 group-hover:text-white transition">
+                                                             DIRECT <span>↗</span>
+                                                         </div>
                                                      </div>
                                                  ))}
                                             </div>
