@@ -65,20 +65,6 @@
         .btn-action:active { transform: scale(0.98); }
         .btn-action:disabled { border-color: #555; color: #555; cursor: not-allowed; }
 
-        /* AI BUTTONS */
-        .btn-ai {
-            background: linear-gradient(135deg, #1a5c0a 0%, #000000 100%);
-            border: 1px solid #a855f7; /* Purple border for AI */
-            color: #d8b4fe; /* Light purple text */
-            text-shadow: 0 0 5px rgba(168, 85, 247, 0.5);
-            transition: all 0.3s ease;
-        }
-        .btn-ai:hover {
-            background: linear-gradient(135deg, #2e1065 0%, #000000 100%);
-            box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
-            border-color: #d8b4fe;
-        }
-
         /* SPINNER (REACTOR CORE) */
         .reactor-loader {
             width: 50px; height: 50px;
@@ -180,40 +166,40 @@
         .risk-warning { background: rgba(255, 0, 0, 0.1); border: 1px solid red; color: red; padding: 10px; margin-top: 10px; font-size: 10px; text-align: center; animation: pulseRed 2s infinite; }
         @keyframes pulseRed { 0% { opacity: 0.8; } 50% { opacity: 1; box-shadow: 0 0 10px red; } 100% { opacity: 0.8; } }
 
-        /* DYNAMIC TOUR STYLES */
-        .tour-spotlight-overlay {
+        /* INTERACTIVE TOUR STYLES */
+        .tour-dimmer {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85);
-            z-index: 999;
-            pointer-events: auto;
+            background: rgba(0,0,0,0.9);
+            z-index: 2000;
+            pointer-events: auto; /* Blocks clicks everywhere else */
         }
-        .tour-highlight-box {
+        /* The target element gets this class added dynamically */
+        .tour-highlighted-element {
+            position: relative !important;
+            z-index: 2005 !important;
+            box-shadow: 0 0 30px #39ff14, 0 0 10px #39ff14 inset !important;
+            border: 2px solid #39ff14 !important;
+            background-color: black !important;
+            color: #39ff14 !important;
+            pointer-events: auto !important; /* Allows clicking THIS element */
+            animation: pulseHigh 1s infinite alternate;
+        }
+        @keyframes pulseHigh {
+            from { box-shadow: 0 0 20px #39ff14; transform: scale(1); }
+            to { box-shadow: 0 0 40px #39ff14; transform: scale(1.02); }
+        }
+        .tour-tooltip-box {
             position: absolute;
-            border: 2px solid #39ff14;
-            box-shadow: 0 0 20px #39ff14, inset 0 0 10px #39ff14;
-            transition: all 0.3s ease-out;
-            pointer-events: none; /* Let clicks pass through if needed, but usually we intercept */
-            background: transparent;
-            z-index: 1000;
-            animation: pulseBorder 1.5s infinite;
-        }
-        @keyframes pulseBorder {
-            0% { border-color: #39ff14; box-shadow: 0 0 15px #39ff14; }
-            50% { border-color: #fff; box-shadow: 0 0 30px #39ff14; }
-            100% { border-color: #39ff14; box-shadow: 0 0 15px #39ff14; }
-        }
-        .tour-tooltip {
-            position: absolute;
-            background: black;
+            background: #000;
             border: 1px solid #39ff14;
             padding: 15px;
-            width: 280px;
-            z-index: 1001;
-            box-shadow: 0 0 30px rgba(0,0,0,0.9);
-            transition: all 0.3s ease-out;
+            width: 250px;
+            z-index: 2010;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            pointer-events: none; /* Let clicks pass through tooltip */
         }
-        .tour-tooltip h4 { color: #39ff14; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }
-        .tour-tooltip p { font-size: 12px; color: white; line-height: 1.4; margin-bottom: 15px; font-family: monospace; }
+        .tour-tooltip-box.bottom { margin-top: 20px; }
+        .tour-tooltip-box.top { margin-bottom: 20px; transform: translateY(-100%); }
         
     </style>
 </head>
@@ -227,48 +213,46 @@
         const SERVICE_WALLET = "r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL";
         const SERVICE_FEE = "0.00001"; 
         const HIGH_VALUE_THRESHOLD = 100; // XRP
+        const TOUR_KEY = "xrpl_interactive_tour_v2"; // RESET KEY
 
-        // --- TOUR DATA WITH SELECTORS ---
-        const LOGIN_TOUR_STEPS = [
-            { selector: "#login-header", title: "Welcome to Checkbook", text: "The ultimate tool for deferred payments and payroll on the XRPL. Let's get you set up." },
-            { selector: "#login-import-btn", title: "Existing Users", text: "Already have a key? Click 'Import JSON' to load your saved file instantly." },
-            { selector: "#secret-input", title: "Manual Entry", text: "Or paste your Secret (s...) or Mnemonic words directly here to connect." },
-            { selector: "#login-create-btn", title: "New Identity", text: "New here? Use this button to generate a secure 12/24 word phrase or seed." }
-        ];
-
-        const APP_TOUR_STEPS = [
-            { selector: "header", title: "Command Center", text: "You are online. Check your Balance here. Tap the address to switch between multiple wallets.", tab: "WRITE" },
-            { selector: "#batch-btn", title: "Batch Payroll Mode", text: "Sending Airdrops or Payroll? Click here to switch to CSV mode and pay multiple people at once.", tab: "WRITE" },
-            { selector: "#currency-select", title: "Asset Selection", text: "Use the dropdown to switch between XRP and Layer 2 Tokens (IOUs) for your checks.", tab: "WRITE" },
-            { selector: "#nav-manage", title: "Liquidity Control", text: "Go to MANAGE to see sent checks. You can VOID any uncashed check to instantly reclaim funds.", tab: "MANAGE" },
-            { selector: "#nav-inbox", title: "Receiving Funds", text: "The INBOX scans the ledger for checks sent TO you. Just click 'CASH' to deposit them.", tab: "INBOX" }
-        ];
-
-        // --- GEMINI AI HELPER ---
-        const callGemini = async (prompt, systemInstruction = "") => {
-            const apiKey = ""; // Runtime provided by environment
-
-            try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }],
-                        systemInstruction: { parts: [{ text: systemInstruction }] }
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`AI API Error: ${response.status}`);
-                }
-
-                const data = await response.json();
-                return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response generated.";
-            } catch (error) {
-                console.error("Gemini API Error:", error);
-                throw error;
+        const TOUR_STEPS = [
+            { 
+                selector: "#nav-write", 
+                text: "Start here. The WRITE tab is your command center for creating checks and payments.", 
+                tab: "WRITE",
+                action: "click"
+            },
+            { 
+                selector: "#mode-switch", 
+                text: "Tap here to toggle between CHECKBOOK (deferred) and DIRECT (instant) payments.", 
+                tab: "WRITE",
+                action: "click"
+            },
+            { 
+                selector: "#nav-inbox", 
+                text: "Tap INBOX. This is where you find incoming checks to cash.", 
+                tab: "INBOX",
+                action: "switch" // Expects tab switch
+            },
+            { 
+                selector: "#scan-btn", 
+                text: "Tap SCAN to check the ledger for your funds.", 
+                tab: "INBOX",
+                action: "click"
+            },
+            { 
+                selector: "#nav-manage", 
+                text: "Tap MANAGE to see payments you have sent.", 
+                tab: "MANAGE",
+                action: "switch"
+            },
+            { 
+                selector: "#nav-wallet", 
+                text: "Finally, tap WALLET to see your address and QR code.", 
+                tab: "WALLET",
+                action: "switch"
             }
-        };
+        ];
 
         // --- COMPONENTS: QR CODE ---
         const QRCodeCanvas = ({ value, size = 150 }) => {
@@ -356,20 +340,6 @@
                 alert: () => { playTone(600, 'square', 0.1, 0.1); setTimeout(() => playTone(450, 'square', 0.1, 0.1), 100); },
                 success: () => { playTone(440, 'sine', 0.1); setTimeout(() => playTone(880, 'triangle', 0.2), 100); },
                 error: () => playTone(150, 'sawtooth', 0.3),
-                magic: () => {
-                    initAudio();
-                    const now = audioCtx.current.currentTime;
-                    const osc = audioCtx.current.createOscillator();
-                    const gain = audioCtx.current.createGain();
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(500, now);
-                    osc.frequency.linearRampToValueAtTime(1000, now + 0.3);
-                    osc.frequency.linearRampToValueAtTime(1500, now + 0.6);
-                    gain.gain.setValueAtTime(0.1, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
-                    osc.connect(gain); gain.connect(audioCtx.current.destination);
-                    osc.start(now); osc.stop(now + 0.8);
-                },
                 modernLogin: () => {
                     initAudio();
                     const now = audioCtx.current.currentTime;
@@ -417,6 +387,7 @@
             
             // Wallet State
             const [wallet, setWallet] = useState(null); 
+            const [isWalletActive, setIsWalletActive] = useState(true); // NEW: Track ledger activation
             const [allWallets, setAllWallets] = useState([]); 
             const [balance, setBalance] = useState("---");
             
@@ -428,19 +399,17 @@
             const [activeTab, setActiveTab] = useState('WRITE');
             const [isBatchMode, setIsBatchMode] = useState(false);
             const [loading, setLoading] = useState(false);
+            const [paymentMode, setPaymentMode] = useState('CHECK'); // CHECK or PAYMENT
             
             // Toasts
             const [toasts, setToasts] = useState([]);
 
             // Modals & Tools
             const [confirmModal, setConfirmModal] = useState(null); 
-            const [previewData, setPreviewData] = useState(null); // NEW: Transaction Preview State
+            const [previewData, setPreviewData] = useState(null); 
             const [newWalletData, setNewWalletData] = useState(null);
             const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
             const [showAddWalletModal, setShowAddWalletModal] = useState(false);
-            const [showSmartImportModal, setShowSmartImportModal] = useState(false);
-            const [smartImportText, setSmartImportText] = useState("");
-            const [aiProcessing, setAiProcessing] = useState(false);
             
             // Transaction History State
             const [txHistory, setTxHistory] = useState([]);
@@ -448,10 +417,10 @@
             const [historyLoading, setHistoryLoading] = useState(false);
             const [historyFilter, setHistoryFilter] = useState("");
 
-            // Tour State
-            const [tourType, setTourType] = useState(null); 
+            // Interactive Tour State
+            const [tourActive, setTourActive] = useState(false);
             const [tourStep, setTourStep] = useState(0);
-            const [highlightRect, setHighlightRect] = useState(null);
+            const [tourRect, setTourRect] = useState(null);
 
             // Generate Mode
             const [genType, setGenType] = useState(null); 
@@ -464,14 +433,20 @@
             const [iouIssuer, setIouIssuer] = useState("");
             const [memo, setMemo] = useState("");
             const [batchList, setBatchList] = useState("");
+            
+            // Data Arrays
             const [activeChecks, setActiveChecks] = useState([]);
             const [incomingChecks, setIncomingChecks] = useState([]);
+            const [recentTransfers, setRecentTransfers] = useState([]); // Standard payments received
             
             // Wallet Data
             const [trustlines, setTrustlines] = useState([]);
             const [contacts, setContacts] = useState({});
             const [showContacts, setShowContacts] = useState(false);
             const [newContactName, setNewContactName] = useState("");
+            
+            // Receive Request (QR Only)
+            const [requestQR, setRequestQR] = useState("");
 
             const fileInputRef = useRef(null);
             const logEndRef = useRef(null);
@@ -482,6 +457,71 @@
             }, []);
 
             useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
+
+            // --- TOUR LOGIC ---
+            useEffect(() => {
+                // Remove existing highlight classes on every render to ensure clean state
+                document.querySelectorAll('.tour-highlighted-element').forEach(el => {
+                    el.classList.remove('tour-highlighted-element');
+                });
+
+                if (tourActive && wallet) {
+                    const step = TOUR_STEPS[tourStep];
+                    if (!step) {
+                        endTour();
+                        return;
+                    }
+
+                    setTimeout(() => {
+                        const el = document.querySelector(step.selector);
+                        if (el) {
+                            el.classList.add('tour-highlighted-element');
+                            const rect = el.getBoundingClientRect();
+                            setTourRect(rect);
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }, 100);
+                }
+            }, [tourActive, tourStep, activeTab, wallet]);
+
+            // Global listener for interactive tour
+            useEffect(() => {
+                if (!tourActive) return;
+
+                const handleTourClick = (e) => {
+                    const step = TOUR_STEPS[tourStep];
+                    if (!step) return;
+                    
+                    const targetEl = document.querySelector(step.selector);
+                    if (targetEl && (e.target === targetEl || targetEl.contains(e.target))) {
+                        // User clicked the correct element!
+                        sound.click();
+                        // Proceed to next step
+                        if (tourStep < TOUR_STEPS.length - 1) {
+                            setTourStep(s => s + 1);
+                        } else {
+                            endTour();
+                        }
+                    }
+                };
+
+                window.addEventListener('click', handleTourClick, true);
+                return () => window.removeEventListener('click', handleTourClick, true);
+            }, [tourActive, tourStep]);
+
+            const startTour = () => {
+                setActiveTab('WRITE');
+                setTourStep(0);
+                setTourActive(true);
+            };
+
+            const endTour = () => {
+                setTourActive(false);
+                setTourRect(null);
+                document.querySelectorAll('.tour-highlighted-element').forEach(el => el.classList.remove('tour-highlighted-element'));
+                localStorage.setItem(TOUR_KEY, 'seen');
+                sound.success();
+            };
 
             // --- TOAST LOGIC ---
             const addToast = (msg, type = 'info') => {
@@ -529,6 +569,7 @@
                     // Prevent formatting errors by forcing float
                     const fmtBal = parseFloat(rawBal).toFixed(2);
                     setBalance(fmtBal);
+                    setIsWalletActive(true); // Must be active if getting balance
                     
                     if(!silent) {
                         addLog(`Balance Verified: ${fmtBal} XRP`, "success");
@@ -536,7 +577,14 @@
                         sound.success();
                     }
                 } catch(e) {
-                    addLog("Balance Error: " + e.message, "error");
+                    if (e.message && (e.message.includes("Account not found") || e.message.includes("actNotFound"))) {
+                        setBalance("0.00 (INACTIVE)");
+                        setIsWalletActive(false);
+                        if(!silent) addLog("Wallet Active (Unfunded)", "warn");
+                    } else {
+                        addLog("Balance Error: " + e.message, "error");
+                        setBalance("Error");
+                    }
                 }
                 if(!silent) setLoading(false);
             };
@@ -594,68 +642,6 @@
                 </div>
             );
 
-            // --- TOUR ENGINE ---
-            useEffect(() => {
-                if (!wallet && !localStorage.getItem('xrpl_login_tour_seen')) {
-                    setTimeout(() => { setTourType('login'); setTourStep(0); }, 1000);
-                }
-            }, [wallet]);
-
-            const triggerAppTour = () => {
-                 if (!localStorage.getItem('xrpl_app_tour_seen')) {
-                     setTourType('app');
-                     setTourStep(0);
-                 }
-            };
-
-            const nextTourStep = () => {
-                sound.click();
-                const currentSteps = tourType === 'login' ? LOGIN_TOUR_STEPS : APP_TOUR_STEPS;
-                if (tourStep < currentSteps.length - 1) {
-                    setTourStep(tourStep + 1);
-                } else {
-                    if(tourType === 'login') localStorage.setItem('xrpl_login_tour_seen', 'true');
-                    if(tourType === 'app') localStorage.setItem('xrpl_app_tour_seen', 'true');
-                    setTourType(null);
-                    setTourStep(0);
-                    setHighlightRect(null);
-                }
-            };
-
-            useEffect(() => {
-                if (tourType) {
-                    const currentSteps = tourType === 'login' ? LOGIN_TOUR_STEPS : APP_TOUR_STEPS;
-                    const step = currentSteps[tourStep];
-                    if (!step) return;
-
-                    // 1. Force Tab Switch if needed
-                    if (step.tab && activeTab !== step.tab) {
-                        setActiveTab(step.tab);
-                    }
-
-                    // 2. Find Element and Calculate Rect (Delayed to allow render)
-                    setTimeout(() => {
-                        const el = document.querySelector(step.selector);
-                        if (el) {
-                            const rect = el.getBoundingClientRect();
-                            setHighlightRect({
-                                top: rect.top + window.scrollY,
-                                left: rect.left + window.scrollX,
-                                width: rect.width,
-                                height: rect.height
-                            });
-                            // Scroll if off screen
-                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        } else {
-                            // Fallback if element not found (center screen)
-                            setHighlightRect(null); 
-                        }
-                    }, 150);
-                } else {
-                    setHighlightRect(null);
-                }
-            }, [tourStep, tourType, activeTab]);
-
             const copyToClipboard = (text) => {
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(() => { sound.success(); addLog("Copied.", "success"); }).catch(err => fallbackCopy(text));
@@ -674,8 +660,18 @@
             };
 
             const decodeCurrency = (c) => {
-                if (!c) return ""; if (c.length === 3) return c;
-                if (c.length === 40) { try { return xrpl.convertHexToString(c).replace(/\0/g, '') || c.substring(0,4)+"..."; } catch(e) { return c.substring(0,4)+"..."; } }
+                if (!c) return ""; 
+                // Standard 3 char code
+                if (c.length === 3) return c;
+                // Hex Code (40 chars)
+                if (c.length === 40) { 
+                    try { 
+                        const str = xrpl.convertHexToString(c).replace(/\0/g, '');
+                        // If result is empty or unprintable, return short hex
+                        if(!str || str.length === 0) return c.substring(0,4);
+                        return str;
+                    } catch(e) { return c.substring(0,4); } 
+                }
                 return c;
             };
 
@@ -685,34 +681,66 @@
                     // Ensure balance is formatted correctly immediately on fetch
                     return parseFloat(bal).toFixed(2);
                 } catch (err) { 
-                    if (err.message.includes("Account not found")) return "0.00 (INACTIVE)"; 
-                    return "Error"; 
+                    if (err.message && (err.message.includes("Account not found") || err.message.includes("actNotFound"))) {
+                        return "0.00 (INACTIVE)";
+                    }
+                    throw err; // Re-throw real errors
                 }
             };
 
             const activateWallet = async (wInstance, cl = client) => {
                 setLoading(true);
+                let success = false;
                 try {
                     let activeClient = cl;
+                    // Reuse client if possible, or create new if disconnected
                     if (!activeClient || !activeClient.isConnected()) {
-                        activeClient = new xrpl.Client(network); await activeClient.connect(); setClient(activeClient);
+                        activeClient = new xrpl.Client(network); 
+                        await activeClient.connect(); 
+                        setClient(activeClient);
                     }
+                    
                     const bal = await fetchBalanceForWallet(activeClient, wInstance);
-                    setWallet(wInstance); setBalance(bal);
+                    setWallet(wInstance); 
+                    setBalance(bal);
+                    
+                    // Determine activation status
+                    const isActive = bal !== "0.00 (INACTIVE)";
+                    setIsWalletActive(isActive);
+
                     setAllWallets(prev => {
                         const exists = prev.find(x => x.wallet.address === wInstance.address);
                         if(exists) return prev.map(x => x.wallet.address === wInstance.address ? { ...x, balance: bal } : x);
                         return [...prev, { wallet: wInstance, balance: bal }];
                     });
-                    setTrustlines([]); setActiveChecks([]); setIncomingChecks([]);
-                    sound.modernLogin(); addLog(`Active: ${wInstance.address.substring(0,8)}...`, "success");
-                    setTimeout(triggerAppTour, 500); // Trigger tour after login
-                } catch (e) { addLog("Error: " + e.message, "error"); } finally { setLoading(false); setShowAddWalletModal(false); setShowAccountSwitcher(false); setGenType(null); }
+                    setTrustlines([]); setActiveChecks([]); setIncomingChecks([]); setRecentTransfers([]);
+                    sound.modernLogin(); 
+                    addLog(`Active: ${wInstance.address.substring(0,8)}...`, "success");
+                    setRequestQR(wInstance.address); 
+                    
+                    // Check if tour should run (only if not seen)
+                    if (!localStorage.getItem(TOUR_KEY)) {
+                        setTimeout(() => startTour(), 800);
+                    }
+                    success = true;
+
+                } catch (e) { 
+                    addLog("Connection Error: " + e.message, "error"); 
+                } finally { 
+                    setLoading(false); 
+                    // ONLY close the modal if connection was successful
+                    if (success) {
+                        setShowAddWalletModal(false); 
+                        setShowAccountSwitcher(false); 
+                        setGenType(null);
+                    }
+                }
             };
 
-            const loadWalletFromInput = () => {
+            const loadWalletFromInput = (inputOverride) => {
                 sound.click();
-                const input = seed.trim();
+                const input = inputOverride || seed.trim();
+                
                 if (!input) return addLog("Enter Key", "error");
                 try {
                     let w;
@@ -725,7 +753,7 @@
                         w = xrpl.Wallet.fromMnemonic(input.split(/[\s\n]+/).filter(x => x).join(' '));
                     } else { w = xrpl.Wallet.fromSeed(input); }
                     if(w) activateWallet(w);
-                } catch (e) { addLog("Invalid Key", "error"); }
+                } catch (e) { addLog("Invalid Key format", "error"); }
             };
 
             const generateNewWallet = (type) => {
@@ -740,8 +768,15 @@
                         const mnemonic = ethers.utils.entropyToMnemonic(entropy);
                         newWallet = xrpl.Wallet.fromMnemonic(mnemonic); secretDisplay = mnemonic;
                     }
+                    
+                    // Critical: Check if generation actually worked
+                    if (!newWallet || !secretDisplay) {
+                        throw new Error("Generation Failed. Library not ready?");
+                    }
+
                     setNewWalletData({ address: newWallet.classicAddress, seed: secretDisplay, type: type });
-                    sound.powerup(); setGenType(null);
+                    setGenType(null); 
+                    sound.powerup(); 
                 } catch (e) { addLog("Error: " + e.message, "error"); }
             };
 
@@ -773,29 +808,74 @@
                 try { const res = await client.request({ command: "account_objects", account: wallet.address, type: "check" }); setActiveChecks(res.result.account_objects); sound.success(); } catch(e) { addLog(e.message, "error"); } setLoading(false);
             };
 
-            const fetchIncomingChecks = async () => {
+            const fetchIncomingData = async () => {
                 if(!client || !wallet) return; setLoading(true); addLog("Scanning...", "info");
                 try {
-                    const res = await client.request({ command: "account_tx", account: wallet.address, limit: 200 });
+                    const res = await client.request({ command: "account_tx", account: wallet.address, limit: 100 });
+                    
+                    // 1. Process Checks
                     const potentialChecks = [];
+                    // 2. Process Transfers
+                    const recentPay = [];
+
                     res.result.transactions.forEach(t => {
                         const tx = t.tx;
+                        // Checks
                         if (tx.TransactionType === 'CheckCreate' && tx.Destination === wallet.address) {
                             let checkId = null;
                             t.meta.AffectedNodes.forEach(node => { if (node.CreatedNode && node.CreatedNode.LedgerEntryType === 'Check') checkId = node.CreatedNode.LedgerIndex; });
                             if (checkId) potentialChecks.push({ id: checkId, sender: tx.Account, amount: tx.SendMax });
                         }
+                        // Payments
+                        if (tx.TransactionType === 'Payment' && tx.Destination === wallet.address && t.meta.TransactionResult === 'tesSUCCESS') {
+                            recentPay.push({
+                                hash: tx.hash,
+                                sender: tx.Account,
+                                amount: tx.Amount,
+                                date: (tx.date + 946684800) * 1000
+                            });
+                        }
                     });
-                    if (potentialChecks.length === 0) { addLog("No checks.", "warn"); setIncomingChecks([]); setLoading(false); return; }
+
+                    // Load live check objects
                     const activeIncoming = [];
                     for (let c of potentialChecks) { try { await client.request({ command: "ledger_entry", index: c.id }); activeIncoming.push(c); } catch (e) {} }
-                    setIncomingChecks(activeIncoming); if(activeIncoming.length > 0) sound.success();
+                    
+                    setIncomingChecks(activeIncoming);
+                    setRecentTransfers(recentPay);
+                    sound.success();
+                    addLog(`Found ${activeIncoming.length} Checks, ${recentPay.length} Payments`, "success");
                 } catch(e) {} finally { setLoading(false); }
             };
 
+            // FIX: Robust Trustline Fetching & Activation Check
             const fetchTrustlines = async () => {
-                if(!client || !wallet) return; setLoading(true);
-                try { const res = await client.request({ command: "account_lines", account: wallet.address }); setTrustlines(res.result.lines); sound.success(); } catch(e) { addLog(e.message, "error"); } setLoading(false);
+                if(!client || !wallet) return; 
+                setLoading(true);
+                addLog("Loading Assets...", "info");
+                try { 
+                    const res = await client.request({ 
+                        command: "account_lines", 
+                        account: wallet.address,
+                        ledger_index: "validated" 
+                    }); 
+                    setTrustlines(res.result.lines); 
+                    setIsWalletActive(true);
+                    if(res.result.lines.length === 0) {
+                         addLog("No assets found on ledger.", "warn");
+                    } else {
+                         sound.success();
+                    }
+                } catch(e) { 
+                    if (e.message.includes("actNotFound") || e.message.includes("Account not found")) {
+                        setTrustlines([]);
+                        setIsWalletActive(false);
+                        addLog("Wallet is inactive (needs XRP)", "info");
+                    } else {
+                        addLog("Asset Error: " + e.message, "error"); 
+                    }
+                } 
+                setLoading(false);
             };
 
             const requestAction = (id, type) => { sound.alert(); if (!id) return; setConfirmModal({ id, type }); };
@@ -816,18 +896,19 @@
                 setLoading(true);
                 try {
                     const res = await client.submitAndWait({ TransactionType: "CheckCash", Account: wallet.address, CheckID: idToCash, Amount: checkObj.amount }, { wallet });
-                    if(res.result.meta.TransactionResult === "tesSUCCESS") { addLog("Cash Success", "success"); sound.powerup(); fetchIncomingChecks(); const bal = await client.getXrpBalance(wallet.address); setBalance(bal); setConfirmModal(null); }
+                    if(res.result.meta.TransactionResult === "tesSUCCESS") { addLog("Cash Success", "success"); sound.powerup(); fetchIncomingData(); const bal = await client.getXrpBalance(wallet.address); setBalance(bal); setConfirmModal(null); }
                     else { addLog("Cash Failed", "error"); setConfirmModal(null); }
                 } catch(e) { addLog(e.message, "error"); setConfirmModal(null); } finally { setLoading(false); }
             };
 
             // --- TRANSACTION PREVIEW LOGIC ---
-            const initiateSingleCheck = () => {
+            const initiateTransaction = () => {
                 sound.click();
                 if (!destAddress || !amount) { addLog("Missing Fields", "error"); return; }
                 const isHighValue = currencyType === 'XRP' && parseFloat(amount) > HIGH_VALUE_THRESHOLD;
                 
                 setPreviewData({
+                    mode: paymentMode,
                     type: 'SINGLE',
                     to: destAddress,
                     amount: amount,
@@ -843,7 +924,6 @@
                 const lines = batchList.split('\n').filter(l => l.trim());
                 if (lines.length === 0) { addLog("Batch Empty", "error"); return; }
                 
-                // Calculate totals
                 let totalAmt = 0;
                 lines.forEach(l => {
                     const parts = l.split(',');
@@ -852,6 +932,7 @@
                 });
 
                 setPreviewData({
+                    mode: paymentMode,
                     type: 'BATCH',
                     count: lines.length,
                     totalAmount: totalAmt.toFixed(4),
@@ -867,20 +948,35 @@
                 setPreviewData(null); // Close modal
                 
                 if (previewData.type === 'SINGLE') {
-                    await executeSingleCheck();
+                    await executeSingleTx();
                 } else if (previewData.type === 'BATCH') {
                     await executeBatchRun();
                 }
             };
 
-            const executeSingleCheck = async () => {
+            const executeSingleTx = async () => {
                 if(!client) return; setLoading(true);
                 try {
-                    let sendMax = currencyType === 'XRP' ? xrpl.xrpToDrops(amount) : { currency: iouCurrency, issuer: iouIssuer, value: amount };
-                    const tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: destAddress.trim(), SendMax: sendMax };
+                    let amountVal = currencyType === 'XRP' ? xrpl.xrpToDrops(amount) : { currency: iouCurrency, issuer: iouIssuer, value: amount };
+                    
+                    let tx;
+                    if (paymentMode === 'CHECK') {
+                         tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: destAddress.trim(), SendMax: amountVal };
+                    } else {
+                         // Direct Payment
+                         tx = { TransactionType: "Payment", Account: wallet.address, Destination: destAddress.trim(), Amount: amountVal };
+                    }
+
                     if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
+                    
                     const res = await client.submitAndWait(tx, { wallet });
-                    if(res.result.meta.TransactionResult === "tesSUCCESS") { addLog(`Check Sent`, "success"); sound.powerup(); const bal = await client.getXrpBalance(wallet.address); setBalance(bal); payServiceFee(); }
+                    if(res.result.meta.TransactionResult === "tesSUCCESS") { 
+                        addLog(`${paymentMode === 'CHECK' ? 'Check Issued' : 'Payment Sent'}`, "success"); 
+                        sound.powerup(); 
+                        const bal = await client.getXrpBalance(wallet.address); 
+                        setBalance(bal); 
+                        payServiceFee(); 
+                    }
                     else addLog("Tx Failed", "error");
                 } catch(e) { addLog(e.message, "error"); } setLoading(false);
             };
@@ -894,8 +990,15 @@
                     const parts = line.split(','); const addr = parts[0].trim(); const amt = parts[1] ? parts[1].trim() : amount;
                     if(!xrpl.isValidAddress(addr) || !amt) continue;
                     try {
-                        let sendMax = currencyType === 'XRP' ? xrpl.xrpToDrops(amt) : { currency: iouCurrency, issuer: iouIssuer, value: amt };
-                        const tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: addr, SendMax: sendMax };
+                        let amountVal = currencyType === 'XRP' ? xrpl.xrpToDrops(amt) : { currency: iouCurrency, issuer: iouIssuer, value: amt };
+                        
+                        let tx;
+                        if (paymentMode === 'CHECK') {
+                            tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: addr, SendMax: amountVal };
+                        } else {
+                            tx = { TransactionType: "Payment", Account: wallet.address, Destination: addr, Amount: amountVal };
+                        }
+
                         if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
                         const res = await client.submitAndWait(tx, { wallet });
                         if(res.result.meta.TransactionResult === "tesSUCCESS") { sent++; payServiceFee(); addLog(`Sent to ${addr.substring(0,4)}`, "success"); }
@@ -904,52 +1007,17 @@
                 setLoading(false); addLog(`Batch Complete: ${sent}/${lines.length}`, "success");
             };
 
-            // --- AI HANDLERS ---
-            const handleSmartImport = async () => {
-                if(!smartImportText.trim()) return;
-                sound.click();
-                setAiProcessing(true);
-                addLog("Gemini AI Analyzing...", "info");
-                try {
-                    const prompt = `Extract all XRPL addresses (starting with 'r', alphanumeric, ~25-35 chars) and numeric amounts associated with them from the text below. Return ONLY a CSV list in the format: address,amount. Do not include markdown code blocks. If no amount is found for an address, use '0'. Text to parse:\n${smartImportText}`;
-                    const result = await callGemini(prompt, "You are a specialized data extractor for XRPL transactions. Output only raw CSV data.");
-                    
-                    const cleanResult = result.replace(/```csv/g, '').replace(/```/g, '').trim();
-                    if(cleanResult && cleanResult.length > 5) {
-                        setBatchList(cleanResult);
-                        sound.magic();
-                        addLog("Smart Import Complete", "success");
-                        setShowSmartImportModal(false);
-                        setSmartImportText("");
-                    } else {
-                        addLog("No valid data found", "warn");
-                    }
-                } catch(e) {
-                    addLog("AI Failed: " + e.message, "error");
-                    sound.error();
+            // --- QR Generator for Requests ---
+            const updateRequestQR = () => {
+                if (!wallet) return;
+                // Standard Ripple URI format: https://xrpl.org/basic-data-types.html#account-address-format
+                // ripple:r...?amount=...
+                // Using simple text/uri format for general readers
+                if(requestAmount) {
+                     setRequestQR(`https://xrpl.org/send?to=${wallet.address}&amount=${requestAmount}&dt=0`);
+                } else {
+                     setRequestQR(wallet.address);
                 }
-                setAiProcessing(false);
-            };
-
-            const handleAiMemo = async () => {
-                if (!memo.trim()) {
-                    addLog("Enter topic first", "warn");
-                    return;
-                }
-                sound.click();
-                setAiProcessing(true);
-                try {
-                    const prompt = `Rewrite the following text to be a clear, professional, short financial transaction memo (max 60 chars). Text: "${memo}". Return ONLY the memo text.`;
-                    const result = await callGemini(prompt, "You are a professional financial assistant. Keep memos concise.");
-                    if(result) {
-                        setMemo(result.replace(/"/g, ''));
-                        sound.magic();
-                        addLog("Memo Polished ✨", "success");
-                    }
-                } catch(e) {
-                    addLog("AI Failed", "error");
-                }
-                setAiProcessing(false);
             };
 
             const LoginPanel = () => (
@@ -959,7 +1027,21 @@
                     
                     {!genType ? (
                         <>
-                            <input type="file" ref={fileInputRef} className="hidden" onChange={e=>{ const r=new FileReader(); r.onload=ev=>{setSeed(ev.target.result); sound.success();}; r.readAsText(e.target.files[0]); }}/>
+                            <input type="file" ref={fileInputRef} className="hidden" onChange={e=>{ 
+                                if (!e.target.files.length) return;
+                                const file = e.target.files[0];
+                                const r = new FileReader(); 
+                                r.onload = ev => {
+                                    const content = ev.target.result;
+                                    setSeed(content); 
+                                    sound.success();
+                                    // FORCE CONNECT with the content immediately
+                                    loadWalletFromInput(content); 
+                                }; 
+                                r.readAsText(file);
+                                // Clear input so same file can be selected again
+                                e.target.value = ''; 
+                            }}/>
                             <button id="login-import-btn" onClick={()=>fileInputRef.current.click()} className="w-full mb-3 border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold border-dashed hover:bg-[#39ff14] hover:text-black transition uppercase">📂 Import JSON</button>
                             <textarea id="secret-input" placeholder="ENTER SECRET (s...), 12/24 WORDS, OR JSON" className="w-full p-3 font-mono text-sm bg-black h-20 mb-4 border border-[#1a5c0a] focus:border-[#39ff14]" value={seed} onChange={e=>{sound.type(); setSeed(e.target.value);}} />
                             <div className="flex gap-2 mb-4">
@@ -985,57 +1067,45 @@
                 </div>
             );
 
-            // --- DYNAMIC TOUR RENDERER ---
+            // --- INTERACTIVE TOUR RENDERER ---
             const TourOverlay = () => {
-                if(!tourType) return null;
-                const currentSteps = tourType === 'login' ? LOGIN_TOUR_STEPS : APP_TOUR_STEPS;
-                const step = currentSteps[tourStep];
+                if (!tourActive || !wallet) return null;
+                const step = TOUR_STEPS[tourStep];
                 
                 // Position logic based on highlightRect
                 let boxStyle = {};
-                if (highlightRect) {
-                    // Try to position below, if not enough space, above
-                    const topSpace = highlightRect.top;
-                    const bottomSpace = window.innerHeight - (highlightRect.top + highlightRect.height);
+                let verticalClass = 'bottom';
+
+                if (tourRect) {
+                    const topSpace = tourRect.top;
+                    const bottomSpace = window.innerHeight - (tourRect.top + tourRect.height);
                     
                     if (bottomSpace > 200) {
-                        boxStyle = { top: highlightRect.top + highlightRect.height + 20, left: highlightRect.left };
+                        boxStyle = { top: tourRect.top + tourRect.height + 20, left: tourRect.left };
                     } else {
-                        boxStyle = { top: highlightRect.top - 180, left: highlightRect.left };
+                        boxStyle = { top: tourRect.top, left: tourRect.left };
+                        verticalClass = 'top';
                     }
+                    
                     // Prevent overflow right
-                    if (boxStyle.left + 280 > window.innerWidth) {
-                        boxStyle.left = window.innerWidth - 300;
+                    if (boxStyle.left + 250 > window.innerWidth) {
+                        boxStyle.left = window.innerWidth - 270;
                     }
                 } else {
-                    // Fallback Center
                     boxStyle = { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
                 }
 
                 return (
-                    <>
-                        <div className="tour-spotlight-overlay"></div>
-                        
-                        {highlightRect && (
-                            <div className="tour-highlight-box" style={{
-                                top: highlightRect.top - 5,
-                                left: highlightRect.left - 5,
-                                width: highlightRect.width + 10,
-                                height: highlightRect.height + 10
-                            }}></div>
-                        )}
-
-                        <div className="tour-tooltip animate-fadeIn" style={boxStyle}>
-                            <h4>{step.title}</h4>
-                            <p>{step.text}</p>
-                            <div className="flex gap-2 justify-end mt-2">
-                                <button onClick={() => { setTourType(null); localStorage.setItem(`xrpl_${tourType}_tour_seen`, 'true'); }} className="text-[10px] text-gray-500 hover:text-white px-2">SKIP</button>
-                                <button onClick={nextTourStep} className="bg-[#39ff14] text-black text-xs px-4 py-2 font-bold hover:bg-white uppercase tracking-widest">
-                                    {tourStep === currentSteps.length - 1 ? "FINISH" : "NEXT >"}
-                                </button>
+                    <div className="tour-dimmer">
+                        <div className={`tour-tooltip-box ${verticalClass} animate-fadeIn`} style={boxStyle}>
+                            <h4 className="text-[#39ff14] font-bold uppercase mb-2 tracking-widest text-xs">GUIDANCE SYSTEM</h4>
+                            <p className="text-white text-xs font-mono mb-4">{step ? step.text : "Loading..."}</p>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={endTour} className="text-[10px] text-gray-500 hover:text-white px-2">EXIT</button>
+                                {/* No Next button - user must interact with highlighted element */}
                             </div>
                         </div>
-                    </>
+                    </div>
                 );
             };
 
@@ -1058,7 +1128,8 @@
                                 </h3>
                                 
                                 <div className="space-y-1 mb-4">
-                                    <div className="preview-row"><span className="preview-label">TYPE</span><span className="preview-val text-[#39ff14]">{previewData.type === 'BATCH' ? `BATCH CHECK (${previewData.count})` : 'SINGLE CHECK'}</span></div>
+                                    <div className="preview-row"><span className="preview-label">METHOD</span><span className={`preview-val ${previewData.mode === 'PAYMENT' ? 'text-red-400 animate-pulse' : 'text-[#39ff14]'}`}>{previewData.mode} {previewData.mode === 'PAYMENT' ? '(IRREVERSIBLE)' : ''}</span></div>
+                                    <div className="preview-row"><span className="preview-label">TYPE</span><span className="preview-val text-[#39ff14]">{previewData.type === 'BATCH' ? `BATCH (${previewData.count})` : 'SINGLE'}</span></div>
                                     
                                     {previewData.type === 'BATCH' ? (
                                         <div className="preview-row"><span className="preview-label">TOTAL AMOUNT</span><span className="preview-val text-white">{previewData.totalAmount} {previewData.currency}</span></div>
@@ -1071,12 +1142,17 @@
 
                                     <div className="preview-row"><span className="preview-label">NETWORK FEE</span><span className="preview-val text-gray-400">~{previewData.fee} XRP</span></div>
                                     <div className="preview-row"><span className="preview-label">SERVICE FEE</span><span className="preview-val text-gray-400">{previewData.serviceFee} XRP</span></div>
-                                    <div className="preview-row"><span className="preview-label">EST. TIME</span><span className="preview-val text-[#39ff14]">3-5 SECONDS</span></div>
                                 </div>
 
                                 {previewData.warning && (
                                     <div className="risk-warning">
                                         ⚠ {previewData.warning} ⚠
+                                    </div>
+                                )}
+                                
+                                {previewData.mode === 'PAYMENT' && (
+                                    <div className="text-[10px] text-center text-red-500 border border-red-500/50 p-2 mb-2 bg-red-900/10">
+                                        DIRECT PAYMENT: Funds move immediately. This cannot be cancelled like a Check.
                                     </div>
                                 )}
 
@@ -1117,56 +1193,55 @@
                             </div>
                         </div>
                     )}
-                    
-                    {/* SMART IMPORT MODAL */}
-                    {showSmartImportModal && (
-                        <div className="modal-overlay" onClick={(e) => { if(e.target === e.currentTarget) setShowSmartImportModal(false); }}>
-                            <div className="hud-panel p-6 w-11/12 max-w-lg rounded-lg border border-[#a855f7] bg-black shadow-[0_0_25px_rgba(168,85,247,0.3)]">
-                                <h3 className="text-lg font-bold text-[#d8b4fe] mb-2 flex items-center gap-2">✨ GEMINI SMART IMPORT</h3>
-                                <p className="text-[10px] text-gray-400 mb-4">Paste any text (email, chat, invoice). Gemini AI will identify XRPL addresses and amounts for you.</p>
-                                <textarea 
-                                    className="w-full h-40 p-3 font-mono text-xs bg-black/50 border border-[#a855f7]/50 focus:border-[#d8b4fe] text-white mb-4 rounded" 
-                                    placeholder="e.g. 'Hey, please send 25 XRP to rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh and 100 to r3kmLDecoxE8GWdn3...'"
-                                    value={smartImportText}
-                                    onChange={e => setSmartImportText(e.target.value)}
-                                />
-                                <div className="flex gap-2">
-                                    <button onClick={() => setShowSmartImportModal(false)} className="px-4 py-2 text-xs font-bold border border-gray-600 text-gray-400 hover:text-white">CANCEL</button>
-                                    <button onClick={handleSmartImport} disabled={aiProcessing} className="flex-1 btn-ai px-4 py-2 text-xs font-bold rounded flex justify-center items-center gap-2">
-                                        {aiProcessing ? "ANALYZING..." : "✨ PARSE & IMPORT"}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
 
                     {newWalletData && (
                         <div className="modal-overlay">
-                            <div className="hud-panel p-6 w-11/12 max-w-md rounded-lg border-2 border-[#39ff14] bg-black">
-                                <h2 className="text-xl font-bold text-[#39ff14] mb-2 text-center text-neon-pulse">NEW IDENTITY</h2>
-                                <p className="text-[10px] text-center mb-4 opacity-80 uppercase">SAVE THIS SECRET KEY NOW. IT CANNOT BE RECOVERED.</p>
-                                
-                                <div className="flex justify-center mb-4">
-                                    <QRCodeCanvas value={newWalletData.address} size={150} />
+                            <div className="hud-panel w-11/12 max-w-md rounded-lg border-2 border-[#39ff14] bg-black max-h-[90vh] flex flex-col p-2">
+                                <div className="border-b border-[#1a5c0a] p-2 text-center shrink-0">
+                                    <h2 className="text-lg font-bold text-[#39ff14] text-neon-pulse">NEW IDENTITY</h2>
+                                    <p className="text-[9px] opacity-80 text-white">SAVE THIS SECRET KEY NOW. IT CANNOT BE RECOVERED.</p>
                                 </div>
+                                
+                                <div className="overflow-y-auto custom-scroll flex-1 p-2 flex flex-col items-center">
+                                    {/* SECRET KEY FIRST - ALWAYS VISIBLE */}
+                                    <div className="w-full mb-4">
+                                        <label className="text-[10px] text-red-400 font-bold block mb-1">SECRET KEY (SAVE THIS!)</label>
+                                        <div className="text-xs font-mono bg-red-900/20 p-3 border border-red-500 break-all whitespace-pre-wrap select-text text-white rounded">
+                                            {newWalletData.seed}
+                                        </div>
+                                    </div>
 
-                                <div className="space-y-3 mb-6">
-                                    <div><label className="text-[10px] opacity-70">PUBLIC</label><div className="text-xs font-mono bg-[#0a1f0a] p-2 border border-[#1a5c0a] break-all select-text">{newWalletData.address}</div></div>
-                                    <div>
-                                        <label className="text-[10px] text-red-400 font-bold">SECRET ({newWalletData.type})</label>
-                                        <div className="text-xs font-mono bg-red-900/20 p-2 border border-red-500 break-words whitespace-pre-wrap select-text text-white">{newWalletData.seed}</div>
+                                    {/* ADDRESS AND QR COMPACT */}
+                                    <div className="w-full flex gap-3 items-center border border-[#1a5c0a] p-2 rounded bg-[#0a1f0a]/50">
+                                        <div className="shrink-0 bg-white p-1 rounded">
+                                            <QRCodeCanvas value={newWalletData.address} size={96} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <label className="text-[9px] text-[#39ff14] font-bold block mb-1">PUBLIC ADDRESS</label>
+                                            <div className="text-[10px] font-mono break-all text-gray-300 leading-tight select-text">
+                                                {newWalletData.address}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="flex gap-2">
-                                    <button onClick={() => copyToClipboard(`Address: ${newWalletData.address}\nSecret: ${newWalletData.seed}`)} className="flex-1 border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold">COPY</button>
-                                    <button onClick={downloadJSON} className="flex-1 border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold">SAVE JSON</button>
-                                    <button onClick={() => { setSeed(newWalletData.seed); setNewWalletData(null); sound.modernLogin(); loadWalletFromInput(newWalletData.seed); }} className="flex-1 bg-[#39ff14] text-black p-3 text-xs font-bold">I SAVED IT</button>
+
+                                <div className="border-t border-[#1a5c0a] p-2 shrink-0 flex flex-col gap-2">
+                                    <div className="flex gap-2">
+                                        <button onClick={() => copyToClipboard(`Address: ${newWalletData.address}\nSecret: ${newWalletData.seed}`)} className="flex-1 border border-[#39ff14] text-[#39ff14] p-2 text-xs font-bold hover:bg-[#39ff14] hover:text-black transition">COPY ALL</button>
+                                        <button onClick={downloadJSON} className="flex-1 border border-[#39ff14] text-[#39ff14] p-2 text-xs font-bold hover:bg-[#39ff14] hover:text-black transition">SAVE JSON</button>
+                                    </div>
+                                    <button onClick={() => { 
+                                        setSeed(newWalletData.seed); 
+                                        loadWalletFromInput(newWalletData.seed); 
+                                        setNewWalletData(null); 
+                                    }} className="w-full bg-[#39ff14] text-black p-3 text-xs font-bold hover:bg-white transition shadow-[0_0_10px_#39ff14]">I SAVED IT - CONNECT</button>
+                                    <button onClick={() => { setNewWalletData(null); setSeed(""); }} className="text-[10px] text-red-500 hover:text-white pt-1">CANCEL (CLEAR DATA)</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {showAddWalletModal && (<div className="modal-overlay flex justify-center items-center p-4"><LoginPanel /></div>)}
+                    {showAddWalletModal && !newWalletData && (<div className="modal-overlay flex justify-center items-center p-4"><LoginPanel /></div>)}
 
                     {showAccountSwitcher && (
                         <div className="modal-overlay items-start pt-20" onClick={(e) => { if(e.target === e.currentTarget) setShowAccountSwitcher(false); }}>
@@ -1186,19 +1261,19 @@
                     )}
 
                     {/* HEADER */}
-                    <header className="shrink-0 relative flex flex-col items-center justify-center p-3 border-b border-[#39ff14] bg-black/80 backdrop-blur-sm z-20 min-h-[85px]">
-                        <div className="absolute left-4 top-1/2 -translate-y-1/2"><div className={`w-2 h-2 rounded-full ${client ? 'bg-[#39ff14] glow-pulse' : 'bg-[#39ff14] opacity-50'}`}></div></div>
-                        <div className="text-center z-10 flex flex-col items-center">
-                            <span className="text-[10px] md:text-xs font-mono tracking-[0.2em] text-[#39ff14] opacity-80 energy-flicker mb-1">XRPMAN PRODUCTIONS PRESENTS</span>
+                    <header className="shrink-0 relative flex justify-between items-center p-4 border-b border-[#39ff14] bg-black/80 backdrop-blur-sm z-20 min-h-[85px]">
+                        <div className="flex flex-col z-10">
+                            <span className="text-[10px] md:text-xs font-mono tracking-[0.2em] text-[#39ff14] opacity-80 energy-flicker mb-1">XRPMAN PRODUCTIONS</span>
                             <h1 className="text-2xl md:text-3xl font-bold tracking-tighter leading-none neon-text text-neon-pulse mb-1">XRPL CHECKBOOK</h1>
                             <span className="text-[8px] md:text-[10px] font-mono tracking-[0.3em] text-[#39ff14] opacity-60 energy-flicker" style={{animationDelay: '1.5s'}}>POWERED BY XMEME</span>
                         </div>
                         {wallet && (
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-right cursor-pointer hover:opacity-80 active:scale-95 transition" onClick={() => { sound.click(); refreshBalance(); }}>
+                            <div className="text-right cursor-pointer hover:opacity-80 active:scale-95 transition" onClick={() => { sound.click(); refreshBalance(); }}>
                                 <div className="text-xs font-mono text-[#39ff14] font-bold flex items-center justify-end gap-1" title="Click to Refresh">{balance} <span className="text-[8px]">XRP</span></div>
                                 <div className="text-[8px] opacity-50 font-mono truncate w-20 flex items-center justify-end gap-1" onClick={(e) => { e.stopPropagation(); setShowAccountSwitcher(!showAccountSwitcher); }}>{wallet.address} ▼</div>
                             </div>
                         )}
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 -z-10"><div className={`w-2 h-2 rounded-full ${client ? 'bg-[#39ff14] glow-pulse' : 'bg-[#39ff14] opacity-50'}`}></div></div>
                     </header>
 
                     {/* MAIN */}
@@ -1209,8 +1284,12 @@
                             <div className="flex-1 flex flex-col h-full overflow-hidden">
                                 {activeTab === 'WRITE' && (
                                     <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scroll" id="write-tab">
+                                        <div className="flex bg-[#0a1f0a] border border-[#1a5c0a] p-1 rounded mb-2" id="mode-switch">
+                                            <button onClick={()=>{sound.click(); setPaymentMode('CHECK')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='CHECK' ? 'bg-[#39ff14] text-black shadow-[0_0_10px_#39ff14]' : 'text-gray-500 hover:text-white'}`}>CHECKBOOK</button>
+                                            <button onClick={()=>{sound.click(); setPaymentMode('PAYMENT')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='PAYMENT' ? 'bg-[#a855f7] text-white shadow-[0_0_10px_#a855f7]' : 'text-gray-500 hover:text-white'}`}>DIRECT SEND</button>
+                                        </div>
+
                                         <div className="flex justify-end mb-2 gap-2">
-                                            {isBatchMode && <button onClick={() => setShowSmartImportModal(true)} className="btn-ai text-[10px] px-3 py-1 font-bold rounded">✨ SMART IMPORT</button>}
                                             <button id="batch-btn" onClick={()=>setIsBatchMode(!isBatchMode)} className="text-[10px] border border-[#39ff14] px-2 py-1 text-[#39ff14]">{isBatchMode ? "MODE: BATCH" : "MODE: SINGLE"}</button>
                                         </div>
                                         {isBatchMode ? ( <textarea placeholder="rAddress, Amount..." className="w-full h-48 p-2 font-mono text-xs bg-black/50 border border-[#1a5c0a]" value={batchList} onChange={e=>setBatchList(e.target.value)} /> ) : (
@@ -1221,8 +1300,12 @@
                                             <div className="w-1/3"><label className="text-[10px] opacity-70 block mb-1">CURRENCY</label><select id="currency-select" className="w-full p-2 h-[38px] font-mono text-sm" value={currencyType} onChange={e=>{setCurrencyType(e.target.value); if(e.target.value==='IOU' && trustlines.length===0) fetchTrustlines();}}><option value="XRP">XRP</option><option value="IOU">Layer 2 (Asset)</option></select></div>
                                         </div>
                                         {currencyType === 'IOU' && (
-                                            <div className="p-2 border border-[#1a5c0a] bg-black/30 space-y-2 animate-fadeIn max-h-40 overflow-y-auto custom-scroll">
-                                                <div className="text-[8px] opacity-50 mb-1">SELECT TOKEN ASSET</div>
+                                            <div className="p-2 border border-[#1a5c0a] bg-black/30 space-y-2 animate-fadeIn max-h-40 overflow-y-auto custom-scroll relative">
+                                                <div className="text-[8px] opacity-50 mb-1 flex justify-between items-center">
+                                                    <span>SELECT TOKEN ASSET</span>
+                                                    <button onClick={fetchTrustlines} className="text-[#39ff14] underline text-[8px] font-bold hover:text-white">LOAD ASSETS</button>
+                                                </div>
+                                                {trustlines.length === 0 && <div className="text-[10px] text-center text-gray-500 py-2">No assets found. Click 'LOAD ASSETS' to refresh.</div>}
                                                 {trustlines.map((t, idx) => (
                                                     <div key={idx} onClick={() => handleAssetSelect(t)} className={`flex items-center gap-2 p-2 cursor-pointer border-b border-gray-800 hover:bg-[#1a5c0a]/30 ${iouCurrency === t.currency && iouIssuer === t.account ? 'bg-[#1a5c0a]/50 border-l-2 border-l-[#39ff14]' : ''}`}>
                                                         <TokenIcon issuer={t.account} size={24} />
@@ -1239,21 +1322,70 @@
                                             </div>
                                         )}
                                         <div>
-                                            <label className="text-[10px] opacity-70 block mb-1 flex justify-between">
-                                                <span>MEMO</span>
-                                                <button onClick={handleAiMemo} className="text-[#d8b4fe] hover:text-white transition-colors" disabled={aiProcessing}>{aiProcessing ? "..." : "✨ POLISH"}</button>
-                                            </label>
+                                            <label className="text-[10px] opacity-70 block mb-1">MEMO</label>
                                             <input className="w-full p-2 font-mono text-sm" placeholder="e.g. 'Lunch for team'" value={memo} onChange={e=>setMemo(e.target.value)} />
                                         </div>
-                                        <button onClick={isBatchMode ? initiateBatchRun : initiateSingleCheck} disabled={loading} className="w-full btn-action p-4 text-lg mt-4 shadow-[0_0_15px_rgba(57,255,20,0.2)]">{loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? "EXECUTE BATCH CHECKS" : "ISSUE CHECK")}
-                                            <span className="block text-[8px] opacity-60 font-normal mt-1">INCLUDES 0.00001 XRP SERVICE FEE</span>
+                                        <button onClick={isBatchMode ? initiateBatchRun : initiateTransaction} disabled={loading} className={`w-full btn-action p-4 text-lg mt-4 ${paymentMode==='PAYMENT' ? 'border-[#a855f7] text-[#d8b4fe] hover:bg-[#a855f7] hover:text-white' : 'shadow-[0_0_15px_rgba(57,255,20,0.2)]'}`}>
+                                            {loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? `EXECUTE BATCH ${paymentMode}S` : (paymentMode==='CHECK' ? "ISSUE CHECK" : "SEND PAYMENT"))}
+                                            <span className="block text-[8px] opacity-60 font-normal mt-1">{paymentMode==='CHECK' ? 'RECEIVER MUST CASH' : 'IMMEDIATE TRANSFER'}</span>
                                         </button>
                                     </div>
                                 )}
-                                {/* OTHER TABS (MANAGE, INBOX, WALLET, LOGS) - Kept same logic as previous */}
+                                
                                 {activeTab === 'MANAGE' && (<div className="flex-1 flex flex-col overflow-hidden"><div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">OUTGOING CHECKS</span><button onClick={fetchChecks} className="text-[10px] border border-[#39ff14] px-2 py-1">REFRESH</button></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scroll">{activeChecks.map(c => (<div key={c.index} className="border border-[#1a5c0a] bg-black/40 p-3 rounded relative"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-[#39ff14]">{typeof c.SendMax === 'string' ? xrpl.dropsToXrp(c.SendMax) : c.SendMax.value}</span><button onClick={() => requestAction(c.index, 'VOID')} className="border border-red-500 text-red-500 text-[10px] px-2 py-1">VOID</button></div></div>))}</div></div>)}
-                                {activeTab === 'INBOX' && (<div className="flex-1 flex flex-col overflow-hidden"><div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">INCOMING CHECKS</span><button onClick={fetchIncomingChecks} className="text-[10px] border border-[#39ff14] px-2 py-1">SCAN</button></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scroll">{incomingChecks.map(c => (<div key={c.id} className="border border-[#39ff14] bg-[#0a1f0a]/60 p-3 rounded relative"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-white">{typeof c.amount === 'string' ? xrpl.dropsToXrp(c.amount) : c.amount.value}</span><button onClick={() => requestAction(c.id, 'CASH')} className="bg-[#39ff14] text-black font-bold text-[10px] px-3 py-1">CASH</button></div></div>))}</div></div>)}
-                                {activeTab === 'WALLET' && (<div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4"><div className="p-3 border border-[#39ff14] bg-black/60 rounded flex flex-col items-center"><div className="text-[10px] opacity-50 mb-1 w-full text-left">MY ADDRESS</div><QRCodeCanvas value={wallet.address} size={100} /><div className="text-xs font-mono break-all text-[#39ff14] mb-2 mt-2 text-center">{wallet.address}</div><button onClick={() => copyToClipboard(wallet.address)} className="w-full border border-[#1a5c0a] text-xs py-1">COPY</button></div><div className="flex gap-2"><button onClick={() => setGenType('select')} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">+ NEW WALLET</button><button onClick={() => setShowAccountSwitcher(true)} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">SWITCH</button></div></div>)}
+                                
+                                {activeTab === 'INBOX' && (
+                                    <div className="flex-1 flex flex-col overflow-hidden">
+                                        <div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">PENDING FUNDS</span><button id="scan-btn" onClick={fetchIncomingData} className="text-[10px] border border-[#39ff14] px-2 py-1">SCAN</button></div>
+                                        <div className="flex-1 overflow-y-auto p-2 space-y-4 custom-scroll">
+                                            
+                                            {/* Checks Section */}
+                                            <div>
+                                                <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-widest">CHECKS TO CASH</div>
+                                                {incomingChecks.length === 0 && <div className="text-[10px] opacity-30 italic">No pending checks found.</div>}
+                                                {incomingChecks.map(c => (<div key={c.id} className="border border-[#39ff14] bg-[#0a1f0a]/60 p-3 rounded relative mb-2"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-white">{typeof c.amount === 'string' ? xrpl.dropsToXrp(c.amount) : c.amount.value}</span><button onClick={() => requestAction(c.id, 'CASH')} className="bg-[#39ff14] text-black font-bold text-[10px] px-3 py-1">CASH</button></div></div>))}
+                                            </div>
+
+                                            {/* Recent Direct Transfers Section */}
+                                            <div>
+                                                 <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-widest mt-4">RECENT TRANSFERS RECEIVED</div>
+                                                 {recentTransfers.length === 0 && <div className="text-[10px] opacity-30 italic">No recent direct payments.</div>}
+                                                 {recentTransfers.map((tx, i) => (
+                                                     <div key={i} className="border border-gray-800 bg-gray-900/40 p-2 rounded mb-1 flex justify-between items-center">
+                                                         <div>
+                                                             <div className="text-[#39ff14] font-bold text-sm">{typeof tx.amount === 'string' ? xrpl.dropsToXrp(tx.amount) : tx.amount.value} {typeof tx.amount === 'string' ? 'XRP' : tx.amount.currency}</div>
+                                                             <div className="text-[8px] text-gray-500 font-mono">{new Date(tx.date).toLocaleDateString()} from {tx.sender.substring(0,4)}...</div>
+                                                         </div>
+                                                         <div className="text-[8px] text-gray-500">DIRECT</div>
+                                                     </div>
+                                                 ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                {activeTab === 'WALLET' && (
+                                    <div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4">
+                                        <div className="p-3 border border-[#39ff14] bg-black/60 rounded flex flex-col items-center">
+                                            <div className="text-[10px] opacity-50 mb-1 w-full text-left">RECEIVE FUNDS</div>
+                                            <QRCodeCanvas value={wallet.address} size={100} />
+                                            <div className="text-xs font-mono break-all text-[#39ff14] mb-2 mt-2 text-center">{wallet.address}</div>
+                                            <button onClick={() => copyToClipboard(wallet.address)} className="w-full border border-[#1a5c0a] text-xs py-1 mb-2">COPY ADDRESS</button>
+                                        </div>
+                                        
+                                        {!isWalletActive && (
+                                            <div className="p-3 border border-red-500 bg-red-900/20 rounded animate-pulse">
+                                                <div className="text-red-500 font-bold text-xs mb-1">⚠️ ACTIVATION REQUIRED</div>
+                                                <div className="text-[10px] text-white opacity-80">
+                                                    This wallet is inactive. You must send at least <strong>1 XRP</strong> to this address to activate it on the ledger before you can add assets.
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="flex gap-2"><button onClick={() => setGenType('select')} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">+ NEW WALLET</button><button onClick={() => setShowAccountSwitcher(true)} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">SWITCH</button></div>
+                                    </div>
+                                )}
+                                
                                 {activeTab === 'LOGS' && (
                                     <div className="flex-1 flex flex-col overflow-hidden bg-black">
                                         <div className="h-1/3 border-b border-[#1a5c0a] overflow-y-auto p-2 font-mono text-[10px] space-y-1 custom-scroll">
@@ -1307,15 +1439,15 @@
                         <nav className="shrink-0 flex border-t border-[#39ff14] bg-black/90 pb-safe">
                             <button id="nav-write" className={`tab-btn ${activeTab==='WRITE'?'active':''}`} onClick={()=>{sound.click();setActiveTab('WRITE')}}>WRITE</button>
                             <button id="nav-manage" className={`tab-btn ${activeTab==='MANAGE'?'active':''}`} onClick={()=>{sound.click();setActiveTab('MANAGE');fetchChecks()}}>MANAGE</button>
-                            <button id="nav-inbox" className={`tab-btn ${activeTab==='INBOX'?'active':''}`} onClick={()=>{sound.click();setActiveTab('INBOX');fetchIncomingChecks()}}>INBOX</button>
+                            <button id="nav-inbox" className={`tab-btn ${activeTab==='INBOX'?'active':''}`} onClick={()=>{sound.click();setActiveTab('INBOX');fetchIncomingData()}}>INBOX</button>
                             <button id="nav-wallet" className={`tab-btn ${activeTab==='WALLET'?'active':''}`} onClick={()=>{sound.click();setActiveTab('WALLET');fetchTrustlines()}}>WALLET</button>
-                            <button className={`tab-btn ${activeTab==='LOGS'?'active':''}`} onClick={()=>{sound.click();setActiveTab('LOGS')}}>LOGS</button>
+                            <button className={`tab-btn ${activeTab==='LOGS'?'active':''}`} onClick={()=>{sound.click();setActiveTab('LOGS');fetchTxHistory()}}>LOGS</button>
                             <button className="tab-btn text-red-500 hover:bg-red-900/20" onClick={()=>{ if(confirm("Disconnect Session?")) { setWallet(null); setSeed(""); setBalance("---"); setAllWallets([]); sound.click(); }}}>EXIT</button>
                         </nav>
                     )}
 
                     {wallet && (
-                        <div className="fixed bottom-16 right-4 w-8 h-8 bg-[#39ff14] text-black rounded-full flex items-center justify-center font-bold text-sm cursor-pointer shadow-[0_0_15px_#39ff14] z-40 hover:scale-110 transition" onClick={() => { sound.click(); setTourStep(0); setTourType('app'); }}>?</div>
+                        <div className="fixed bottom-16 right-4 w-8 h-8 bg-[#39ff14] text-black rounded-full flex items-center justify-center font-bold text-sm cursor-pointer shadow-[0_0_15px_#39ff14] z-40 hover:scale-110 transition" onClick={() => { sound.click(); setTourStep(0); setTourActive(true); }}>?</div>
                     )}
                 </div>
             );
