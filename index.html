@@ -136,6 +136,7 @@
         .floating-bg {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             pointer-events: none; z-index: 0;
+            overflow: hidden;
         }
         .xrp-logo {
             position: absolute; opacity: 0.15; color: #39ff14;
@@ -201,6 +202,13 @@
         .tour-tooltip-box.bottom { margin-top: 20px; }
         .tour-tooltip-box.top { margin-bottom: 20px; transform: translateY(-100%); }
         
+        /* INTRO VIDEO OVERLAY */
+        .intro-overlay-container {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: black;
+            z-index: 9999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
     </style>
 </head>
 <body>
@@ -213,12 +221,17 @@
         const SERVICE_WALLET = "r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL";
         const SERVICE_FEE = "0.00001"; 
         const HIGH_VALUE_THRESHOLD = 100; // XRP
-        const TOUR_KEY = "xrpl_interactive_tour_v2"; // RESET KEY
+        const TOUR_KEY = "xrpl_interactive_tour_v5"; // Key
+        const INTERNAL_INTRO_KEY = "xrpl_internal_intro_v5"; 
+        const SPLASH_KEY = "xrpl_splash_seen_v2"; // Key
+        
+        const INTERNAL_VIDEO_URL = "https://ipfs.io/ipfs/QmYYDVbVMQZuVFpApWva8ujFNiPLBfa9RkCJX9wDmktgkt";
+        const SPLASH_VIDEO_URL = "https://ipfs.io/ipfs/QmeQ8MrFxQgZjFFBZeMBASXtJg95VATsi3sqK821B2LNAT";
 
         const TOUR_STEPS = [
             { 
                 selector: "#nav-write", 
-                text: "Start here. The WRITE tab is your command center for creating checks and payments.", 
+                text: "Welcome to XRP Checkbook. Start here. The WRITE tab is your command center for creating checks and payments.", 
                 tab: "WRITE",
                 action: "click"
             },
@@ -359,10 +372,56 @@
             };
         };
 
+        /* --- OVERLAY COMPONENTS --- */
+        const IntroOverlay = ({ videoUrl, buttonText, onComplete }) => {
+            const videoRef = useRef(null);
+            const [started, setStarted] = useState(false);
+
+            const play = () => {
+                if(videoRef.current) {
+                    setStarted(true);
+                    videoRef.current.play().catch(e => console.log("Play failed", e));
+                }
+            };
+
+            return (
+                <div className="intro-overlay-container">
+                    {!started && (
+                        <div className="text-center animate-fadeIn z-50">
+                            <h1 className="text-3xl font-bold text-[#39ff14] text-neon-pulse mb-4">XRPL CHECKBOOK</h1>
+                            <button 
+                                onClick={play} 
+                                className="border border-[#39ff14] text-[#39ff14] px-8 py-4 text-xl font-bold tracking-widest hover:bg-[#39ff14] hover:text-black transition shadow-[0_0_20px_#39ff14]"
+                            >
+                                {buttonText}
+                            </button>
+                        </div>
+                    )}
+                    <video
+                        ref={videoRef}
+                        src={videoUrl}
+                        className={`absolute top-0 left-0 w-full h-full object-cover z-40 transition-opacity duration-1000 ${started ? 'opacity-100' : 'opacity-0'}`}
+                        onEnded={onComplete}
+                        playsInline
+                    />
+                    {/* Background blackout behind video */}
+                    <div className="absolute top-0 left-0 w-full h-full bg-black z-30"></div>
+                </div>
+            );
+        };
+
         /* --- BACKGROUND --- */
         const MovingBackground = () => {
             return (
                 <div className="floating-bg">
+                    {/* BACKGROUND VIDEO LAYER - LOOPED & MUTED */}
+                    <video autoPlay loop muted playsInline className="absolute top-0 left-0 w-full h-full object-cover opacity-50 z-0 pointer-events-none">
+                        <source src={INTERNAL_VIDEO_URL} type="video/mp4" />
+                    </video>
+                    {/* Dark Overlay for Readability */}
+                    <div className="absolute top-0 left-0 w-full h-full bg-black/60 z-0 pointer-events-none"></div>
+
+                    {/* Original Particles */}
                     {[...Array(12)].map((_, i) => (
                         <div key={i} className="xrp-logo" style={{ 
                             left: Math.random() * 100 + '%', 
@@ -387,7 +446,7 @@
             
             // Wallet State
             const [wallet, setWallet] = useState(null); 
-            const [isWalletActive, setIsWalletActive] = useState(true); // NEW: Track ledger activation
+            const [isWalletActive, setIsWalletActive] = useState(true); 
             const [allWallets, setAllWallets] = useState([]); 
             const [balance, setBalance] = useState("---");
             
@@ -399,7 +458,7 @@
             const [activeTab, setActiveTab] = useState('WRITE');
             const [isBatchMode, setIsBatchMode] = useState(false);
             const [loading, setLoading] = useState(false);
-            const [paymentMode, setPaymentMode] = useState('CHECK'); // CHECK or PAYMENT
+            const [paymentMode, setPaymentMode] = useState('CHECK'); 
             
             // Toasts
             const [toasts, setToasts] = useState([]);
@@ -417,10 +476,16 @@
             const [historyLoading, setHistoryLoading] = useState(false);
             const [historyFilter, setHistoryFilter] = useState("");
 
-            // Interactive Tour State
+            // Interactive Tour & Intro State
             const [tourActive, setTourActive] = useState(false);
             const [tourStep, setTourStep] = useState(0);
             const [tourRect, setTourRect] = useState(null);
+            
+            // TWO STAGE INTROS
+            const [showSplash, setShowSplash] = useState(false); // Cold Boot
+            const [showInternalIntro, setShowInternalIntro] = useState(false); // Post Login
+
+            const internalIntroCheckedRef = useRef(false); // Ref to track intro status per session
 
             // Generate Mode
             const [genType, setGenType] = useState(null); 
@@ -437,7 +502,7 @@
             // Data Arrays
             const [activeChecks, setActiveChecks] = useState([]);
             const [incomingChecks, setIncomingChecks] = useState([]);
-            const [recentTransfers, setRecentTransfers] = useState([]); // Standard payments received
+            const [recentTransfers, setRecentTransfers] = useState([]); 
             
             // Wallet Data
             const [trustlines, setTrustlines] = useState([]);
@@ -451,21 +516,78 @@
             const fileInputRef = useRef(null);
             const logEndRef = useRef(null);
 
+            // --- MOUNT EFFECT: CHECK SPLASH ---
             useEffect(() => {
                 const saved = localStorage.getItem('xrpl_address_book');
                 if (saved) { try { setContacts(JSON.parse(saved) || {}); } catch (e) {} }
+
+                // Check Splash Status (Cold Boot)
+                if (!localStorage.getItem(SPLASH_KEY)) {
+                    setShowSplash(true);
+                }
             }, []);
 
             useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
-            // --- TOUR LOGIC ---
+            // --- INTRO & TOUR FLOW LOGIC ---
+            
+            // 0. Handle Splash Completion
+            const handleSplashComplete = () => {
+                setShowSplash(false);
+                localStorage.setItem(SPLASH_KEY, 'seen');
+            };
+
+            // 1. Trigger Internal Intro logic AFTER login is complete
+            const handlePostLoginFlow = () => {
+                // SESSION GUARD: Check if we have already handled the intro in this session
+                if (internalIntroCheckedRef.current) return;
+                
+                // STORAGE GUARD: Check if internal intro has EVER been seen
+                const introSeen = localStorage.getItem(INTERNAL_INTRO_KEY);
+                
+                if (!introSeen) {
+                    // Show Internal Intro if never seen
+                    setShowInternalIntro(true); 
+                } else if (!localStorage.getItem(TOUR_KEY)) {
+                    // Skip Intro, Show Tour if Intro seen but Tour not
+                    startTour();
+                }
+                
+                // Mark this session as having checked the intro
+                internalIntroCheckedRef.current = true;
+            };
+
+            // 2. Handle Internal Intro Completion
+            const handleInternalIntroComplete = () => {
+                setShowInternalIntro(false);
+                localStorage.setItem(INTERNAL_INTRO_KEY, 'seen');
+                // Immediately start tour after video
+                startTour();
+            };
+
+            // 3. Manual Reset (The '?' Button)
+            // UPDATED: Now only resets the Tutorial Sequence (Checkbook Video + Tooltips), NOT Splash.
+            const replayTutorialSequence = () => {
+                sound.click();
+                
+                // Clear only internal flags
+                localStorage.removeItem(INTERNAL_INTRO_KEY);
+                localStorage.removeItem(TOUR_KEY);
+                
+                // Allow replay in session
+                internalIntroCheckedRef.current = false;
+                
+                // Start sequence: Checkbook Video -> Tooltips
+                setShowInternalIntro(true);
+            };
+
+            // --- TOUR HIGHLIGHTING LOGIC ---
             useEffect(() => {
-                // Remove existing highlight classes on every render to ensure clean state
                 document.querySelectorAll('.tour-highlighted-element').forEach(el => {
                     el.classList.remove('tour-highlighted-element');
                 });
 
-                if (tourActive && wallet) {
+                if (tourActive && wallet && !showInternalIntro) { 
                     const step = TOUR_STEPS[tourStep];
                     if (!step) {
                         endTour();
@@ -482,11 +604,11 @@
                         }
                     }, 100);
                 }
-            }, [tourActive, tourStep, activeTab, wallet]);
+            }, [tourActive, tourStep, activeTab, wallet, showInternalIntro]);
 
             // Global listener for interactive tour
             useEffect(() => {
-                if (!tourActive) return;
+                if (!tourActive || showInternalIntro) return;
 
                 const handleTourClick = (e) => {
                     const step = TOUR_STEPS[tourStep];
@@ -494,9 +616,7 @@
                     
                     const targetEl = document.querySelector(step.selector);
                     if (targetEl && (e.target === targetEl || targetEl.contains(e.target))) {
-                        // User clicked the correct element!
                         sound.click();
-                        // Proceed to next step
                         if (tourStep < TOUR_STEPS.length - 1) {
                             setTourStep(s => s + 1);
                         } else {
@@ -507,7 +627,7 @@
 
                 window.addEventListener('click', handleTourClick, true);
                 return () => window.removeEventListener('click', handleTourClick, true);
-            }, [tourActive, tourStep]);
+            }, [tourActive, tourStep, showInternalIntro]);
 
             const startTour = () => {
                 setActiveTab('WRITE');
@@ -525,7 +645,7 @@
 
             // --- TOAST LOGIC ---
             const addToast = (msg, type = 'info') => {
-                const id = Date.now();
+                const id = Date.now() + Math.random(); // Fix for duplicate keys
                 setToasts(prev => [...prev, { id, msg, type }]);
                 setTimeout(() => {
                     setToasts(prev => prev.filter(t => t.id !== id));
@@ -729,7 +849,7 @@
                 }
             };
 
-            const activateWallet = async (wInstance, cl = client) => {
+            const activateWallet = async (wInstance, cl = client, isSwitch = false) => {
                 setLoading(true);
                 let success = false;
                 try {
@@ -759,11 +879,12 @@
                     addLog(`Active: ${wInstance.address.substring(0,8)}...`, "success");
                     setRequestQR(wInstance.address); 
                     
-                    // Check if tour should run (only if not seen)
-                    if (!localStorage.getItem(TOUR_KEY)) {
-                        setTimeout(() => startTour(), 800);
-                    }
                     success = true;
+
+                    // Trigger Flow only if NOT switching (Cold boot or first login)
+                    if (!isSwitch) {
+                        setTimeout(handlePostLoginFlow, 800);
+                    }
 
                 } catch (e) { 
                     addLog("Connection Error: " + e.message, "error"); 
@@ -837,7 +958,15 @@
             const removeWallet = (address) => {
                 if(!confirm("Remove session?")) return;
                 const newAll = allWallets.filter(x => x.wallet.address !== address); setAllWallets(newAll);
-                if (wallet && wallet.address === address) { if (newAll.length > 0) activateWallet(newAll[0].wallet, client); else { setWallet(null); setBalance("---"); } }
+                if (wallet && wallet.address === address) { 
+                    if (newAll.length > 0) {
+                        // Switching to remaining wallet -> Pass isSwitch=true
+                        activateWallet(newAll[0].wallet, client, true); 
+                    } else { 
+                        setWallet(null); 
+                        setBalance("---"); 
+                    } 
+                }
             };
 
             const payServiceFee = async () => {
@@ -1208,6 +1337,8 @@
             return (
                 <div className="h-full flex flex-col relative z-10" onClick={sound.click}>
                     <MovingBackground />
+                    {showSplash && <IntroOverlay videoUrl={SPLASH_VIDEO_URL} buttonText="INITIALIZE SYSTEM" onComplete={handleSplashComplete} />}
+                    {showInternalIntro && <IntroOverlay videoUrl={INTERNAL_VIDEO_URL} buttonText="WELCOME USER" onComplete={handleInternalIntroComplete} />}
                     <TourOverlay />
                     <ToastContainer toasts={toasts} removeToast={removeToast} />
                     {loading && <GlobalSpinner />}
@@ -1367,7 +1498,7 @@
                                 <div className="space-y-2 max-h-60 overflow-y-auto custom-scroll mb-4">
                                     {allWallets.map((w, idx) => (
                                         <div key={idx} className={`p-2 border ${w.wallet.address === wallet?.address ? 'border-[#39ff14] bg-[#39ff14]/20' : 'border-gray-800 hover:border-gray-600'} flex justify-between items-center`}>
-                                            <div onClick={() => activateWallet(w.wallet)} className="flex-1 cursor-pointer"><div className="font-mono text-xs text-white">{w.wallet.address}</div><div className="text-[10px] text-[#39ff14]">{w.balance} XRP</div></div>
+                                            <div onClick={() => activateWallet(w.wallet, client, true)} className="flex-1 cursor-pointer"><div className="font-mono text-xs text-white">{w.wallet.address}</div><div className="text-[10px] text-[#39ff14]">{w.balance} XRP</div></div>
                                             {w.wallet.address === wallet?.address ? (<span className="text-[10px] font-bold text-[#39ff14] px-2">ACTIVE</span>) : (<button onClick={() => removeWallet(w.wallet.address)} className="text-red-500 font-bold px-2 text-xs">EJECT</button>)}
                                         </div>
                                     ))}
@@ -1389,6 +1520,9 @@
                                 <div className="text-xs font-mono text-[#39ff14] font-bold flex items-center justify-end gap-1" title="Click to Refresh">{balance} <span className="text-[8px]">XRP</span></div>
                                 <div className="text-[8px] opacity-50 font-mono truncate w-20 flex items-center justify-end gap-1" onClick={(e) => { e.stopPropagation(); setShowAccountSwitcher(!showAccountSwitcher); }}>{wallet.address} ▼</div>
                             </div>
+                        )}
+                        {wallet && (
+                           <div className="absolute bottom-1 right-2 z-50 text-[10px] text-[#39ff14] cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition p-2" onClick={replayTutorialSequence} title="Help / Replay Tutorial">?</div>
                         )}
                         <div className="absolute left-4 top-1/2 -translate-y-1/2 -z-10"><div className={`w-2 h-2 rounded-full ${client ? 'bg-[#39ff14] glow-pulse' : 'bg-[#39ff14] opacity-50'}`}></div></div>
                     </header>
@@ -1564,8 +1698,9 @@
                         </nav>
                     )}
 
+                    {/* Reset Button (Question Mark) */}
                     {wallet && (
-                        <div className="fixed bottom-16 right-4 w-8 h-8 bg-[#39ff14] text-black rounded-full flex items-center justify-center font-bold text-sm cursor-pointer shadow-[0_0_15px_#39ff14] z-40 hover:scale-110 transition" onClick={() => { sound.click(); setTourStep(0); setTourActive(true); }}>?</div>
+                       <div className="fixed bottom-16 right-4 w-8 h-8 bg-[#39ff14] text-black rounded-full flex items-center justify-center font-bold text-sm cursor-pointer shadow-[0_0_15px_#39ff14] z-40 hover:scale-110 transition" onClick={replayTutorialSequence} title="Replay Intro">?</div>
                     )}
                 </div>
             );
