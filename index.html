@@ -219,6 +219,13 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
 
+        /* --- KEYBOARD WAVE ANIMATION --- */
+        @keyframes neonWave {
+            0% { border-color: #333; color: #666; text-shadow: none; box-shadow: 0 1px 0 #000; }
+            20% { border-color: #39ff14; color: #39ff14; text-shadow: 0 0 5px #39ff14; box-shadow: 0 0 5px rgba(57, 255, 20, 0.3); }
+            100% { border-color: #333; color: #666; text-shadow: none; box-shadow: 0 1px 0 #000; }
+        }
+
         /* COMPACT KEYBOARD STYLES */
         .vk-container {
             position: fixed; bottom: 0; left: 0; width: 100%; 
@@ -231,19 +238,28 @@
         .vk-key {
             background: #1a1a1a; color: #fff; border: 1px solid #333;
             border-radius: 4px; 
-            height: 38px; /* Reduced from 45px */
+            height: 38px; 
             min-width: 28px;
             display: flex; align-items: center; justify-content: center;
             font-family: monospace; 
-            font-size: 14px; /* Reduced from 16px */
+            font-size: 14px; 
             font-weight: bold;
             flex: 1; max-width: 45px; cursor: pointer;
             box-shadow: 0 1px 0 #000;
+            /* Animation setup */
+            animation: neonWave 4s infinite ease-in-out;
         }
-        .vk-key:active { background: #39ff14; color: black; transform: translateY(1px); box-shadow: none; }
+        .vk-key:active { 
+            background: #39ff14 !important; 
+            color: black !important; 
+            text-shadow: none !important;
+            transform: translateY(1px); 
+            box-shadow: none !important; 
+            animation: none; /* Stop wave on press for feedback */
+        }
         .vk-key.wide { flex: 1.5; max-width: 60px; font-size: 11px; }
         .vk-key.space { flex: 4; max-width: 180px; }
-        .vk-key.special { background: #111; color: #888; }
+        .vk-key.special { background: #111; color: #888; border-color: #222; }
         .vk-toolbar { display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px solid #1a1a1a; margin-bottom: 6px; }
 
         .custom-cursor {
@@ -334,7 +350,7 @@
         ];
 
         // --- COMPONENTS: VIRTUAL KEYBOARD ---
-        const VirtualKeyboard = ({ onChar, onBackspace, onClose, visible }) => {
+        const VirtualKeyboard = ({ onChar, onBackspace, onClear, onClose, visible }) => {
             const [caps, setCaps] = useState(false);
             
             if (!visible) return null;
@@ -358,33 +374,59 @@
             const row3 = ['a','s','d','f','g','h','j','k','l'];
             const row4 = ['z','x','c','v','b','n','m'];
 
+            // Helper to render keys with cascading delay
+            // We use a global index 'kIdx' to stagger the wave effect across the whole board
+            let kIdx = 0;
+            const renderKey = (k, isWide=false, isSpace=false, isSpecial=false, onClickOverride=null) => {
+                const delay = (kIdx * 0.05) + 's';
+                kIdx++;
+                
+                let classes = "vk-key";
+                if (isWide) classes += " wide";
+                if (isSpace) classes += " space";
+                if (isSpecial) classes += " special";
+                if (isWide && k === 'CAPS' && caps) classes += " bg-[#39ff14] text-black";
+
+                return (
+                    <button 
+                        key={k} 
+                        className={classes} 
+                        onClick={onClickOverride || (() => handleTouch(k))}
+                        style={{ animationDelay: delay }}
+                    >
+                        {k}
+                    </button>
+                );
+            };
+
             return (
                 <div className="vk-container animate-slideUp">
                     <div className="vk-toolbar">
                         <span className="text-xs text-[#39ff14] font-mono animate-pulse">SECURE INPUT ACTIVE</span>
                         <div className="flex gap-4">
                             <button onClick={handlePaste} className="text-xs text-gray-400 hover:text-white"><i className="fas fa-paste"></i> PASTE</button>
+                            <button onClick={onClear} className="text-xs text-orange-500 hover:text-orange-300 font-bold">CLEAR</button>
                             <button onClick={onClose} className="text-xs text-red-500 font-bold">HIDE ▼</button>
                         </div>
                     </div>
                     
                     <div className="vk-row">
-                        {row1.map(k => <button key={k} className="vk-key" onClick={()=>handleTouch(k)}>{k}</button>)}
+                        {row1.map(k => renderKey(k))}
                     </div>
                     <div className="vk-row">
-                        {row2.map(k => <button key={k} className="vk-key" onClick={()=>handleTouch(k)}>{k}</button>)}
+                        {row2.map(k => renderKey(k))}
                     </div>
                     <div className="vk-row px-4">
-                        {row3.map(k => <button key={k} className="vk-key" onClick={()=>handleTouch(k)}>{k}</button>)}
+                        {row3.map(k => renderKey(k))}
                     </div>
                     <div className="vk-row">
-                        <button className={`vk-key wide special ${caps ? 'bg-[#39ff14] text-black' : ''}`} onClick={()=>setCaps(!caps)}>CAPS</button>
-                        {row4.map(k => <button key={k} className="vk-key" onClick={()=>handleTouch(k)}>{k}</button>)}
-                        <button className="vk-key wide special" onClick={onBackspace}>⌫</button>
+                        {renderKey('CAPS', true, false, true, () => setCaps(!caps))}
+                        {row4.map(k => renderKey(k))}
+                        {renderKey('⌫', true, false, true, onBackspace)}
                     </div>
                     <div className="vk-row">
-                        <button className="vk-key space" onClick={()=>handleTouch(' ')}>SPACE</button>
-                        <button className="vk-key wide special" onClick={onClose}>DONE</button>
+                        {renderKey('SPACE', false, true, false, () => handleTouch(' '))}
+                        {renderKey('DONE', true, false, true, onClose)}
                     </div>
                 </div>
             );
@@ -1686,6 +1728,7 @@
                         visible={showKeyboard} 
                         onChar={handleKeyChar} 
                         onBackspace={handleKeyBackspace} 
+                        onClear={() => setSeed("")}
                         onClose={() => setShowKeyboard(false)} 
                     />
 
