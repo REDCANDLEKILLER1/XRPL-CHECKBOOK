@@ -877,4 +877,1187 @@
             const addLog = (msg, type='info') => {
                 setLogs(p => [...p, { time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}), msg, type }]);
                 addToast(msg, type);
-                if(type === 'error') s
+                if(type === 'error') sound.error();
+            };
+
+            // Define derived state for modal
+            const checkDetails = confirmModal && confirmModal.type === 'CASH' 
+                ? incomingChecks.find(c => c.id === confirmModal.id) 
+                : null;
+
+            // Define missing handlers
+            const handleAssetSelect = (t) => {
+               setIouCurrency(t.currency);
+               setIouIssuer(t.account);
+            };
+
+            const saveContact = () => {
+                if(!newContactName || !destAddress) return;
+                const newContacts = {...contacts, [newContactName]: destAddress};
+                setContacts(newContacts);
+                localStorage.setItem('xrpl_address_book', JSON.stringify(newContacts));
+                setNewContactName("");
+                sound.success();
+                addLog("Contact Saved", "success");
+            };
+
+            const refreshBalance = async (silent = false) => {
+                if(!client || !wallet) return;
+                if(!silent) setLoading(true);
+                try {
+                    const rawBal = await client.getXrpBalance(wallet.address);
+                    // Prevent formatting errors by forcing float
+                    const fmtBal = parseFloat(rawBal).toFixed(2);
+                    setBalance(fmtBal);
+                    setIsWalletActive(true); // Must be active if getting balance
+                    
+                    if(!silent) {
+                        addLog(`Balance Verified: ${fmtBal} XRP`, "success");
+                        addLog(`Node: ${network}`, "info");
+                        sound.success();
+                    }
+                } catch(e) {
+                    if (e.message && (e.message.includes("Account not found") || e.message.includes("actNotFound"))) {
+                        setBalance("0.00 (INACTIVE)");
+                        setIsWalletActive(false);
+                        if(!silent) addLog("Wallet Active (Unfunded)", "warn");
+                    } else {
+                        addLog("Balance Error: " + e.message, "error");
+                        setBalance("Error");
+                    }
+                }
+                if(!silent) setLoading(false);
+            };
+
+            // --- UTILITY: HEX TRANSLATOR ---
+            const decodeHex = (hex) => {
+                if (!hex) return "";
+                try {
+                    // XRPL hex strings are often simple hex-encoded utf8
+                    return xrpl.convertHexToString(hex).replace(/\0/g, '');
+                } catch (e) {
+                    return hex; // Fallback to raw hex if decode fails
+                }
+            };
+            
+            const decodeCurrency = (c) => {
+                if (!c) return ""; 
+                // Standard 3 char code
+                if (c.length === 3) return c;
+                // Hex Code (40 chars)
+                if (c.length === 40) { 
+                    try { 
+                        const str = xrpl.convertHexToString(c).replace(/\0/g, '');
+                        // If result is empty or unprintable, return short hex
+                        if(!str || str.length === 0) return c.substring(0,4);
+                        return str;
+                    } catch(e) { return c.substring(0,4); } 
+                }
+                return c;
+            };
+
+            const decodeMemo = (memos) => {
+                if (!memos || memos.length === 0) return null;
+                try {
+                    // Extract first memo data field
+                    const memoData = memos[0].Memo.MemoData;
+                    return decodeHex(memoData);
+                } catch (e) {
+                    return null;
+                }
+            };
+
+            const fetchTxHistory = async (isLoadMore = false) => {
+                if (!client || !wallet) return;
+                setHistoryLoading(true);
+                try {
+                    const req = {
+                        command: "account_tx",
+                        account: wallet.address,
+                        limit: 20,
+                    };
+                    if (isLoadMore && txMarker) req.marker = txMarker;
+
+                    const res = await client.request(req);
+                    
+                    const newTx = res.result.transactions.map(t => {
+                        const memo = decodeMemo(t.tx.Memos);
+                        let desc = t.tx.TransactionType;
+                        
+                        // Custom Description Logic with Memo
+                        if (t.tx.TransactionType === 'Payment') {
+                            const dir = t.tx.Destination === wallet.address ? "Received" : "Sent";
+                            desc = memo ? `${dir} - "${memo}"` : dir;
+                            
+                            // Check for Token payment
+                            if (typeof t.tx.Amount === 'object') {
+                                const currency = decodeCurrency(t.tx.Amount.currency);
+                                desc = `${desc} (${currency})`;
+                            }
+                        } else if (t.tx.TransactionType === 'CheckCreate') {
+                            desc = memo ? `Check Created - "${memo}"` : "Check Created";
+                        } else if (t.tx.TransactionType === 'CheckCash') {
+                            desc = "Check Cashed";
+                        }
+
+                        return {
+                            hash: t.tx.hash,
+                            type: t.tx.TransactionType,
+                            date: (t.tx.date + 946684800) * 1000, // Ripple Epoch
+                            success: t.meta.TransactionResult === "tesSUCCESS",
+                            desc: desc
+                        };
+                    });
+
+                    setTxHistory(prev => isLoadMore ? [...prev, ...newTx] : newTx);
+                    setTxMarker(res.result.marker);
+                    if(!isLoadMore) sound.success();
+                } catch (e) {
+                    addLog("History Error: " + e.message, "error");
+                }
+                setHistoryLoading(false);
+            };
+
+            const renderContacts = () => (
+                <div className="absolute top-full left-0 w-full bg-black border border-[#39ff14] z-50 p-2 shadow-xl animate-fadeIn mt-1">
+                     <div className="flex gap-1 mb-2">
+                        <input className="flex-1 p-1 text-xs bg-[#050505] border border-[#1a5c0a] text-[#39ff14]" placeholder="Save address as..." value={newContactName} onChange={e=>setNewContactName(e.target.value)} />
+                        <button onClick={saveContact} className="text-[10px] bg-[#39ff14] text-black px-2 font-bold hover:bg-white">SAVE</button>
+                     </div>
+                     <div className="max-h-32 overflow-y-auto custom-scroll space-y-1">
+                        {Object.entries(contacts).map(([name, addr]) => (
+                            <div key={name} className="flex justify-between items-center text-xs p-1 hover:bg-[#1a5c0a] cursor-pointer border-b border-gray-800 last:border-0" onClick={()=>{setDestAddress(addr); setShowContacts(false);}}>
+                                <span className="font-bold text-[#39ff14]">{name}</span>
+                                <span className="opacity-50 text-[10px] font-mono">{addr.substring(0,8)}...</span>
+                            </div>
+                        ))}
+                        {Object.keys(contacts).length === 0 && <div className="text-[10px] text-center opacity-50 py-2">No saved contacts</div>}
+                     </div>
+                     <div className="text-center mt-2 border-t border-gray-800 pt-1">
+                        <button onClick={()=>setShowContacts(false)} className="text-[10px] text-gray-500 hover:text-white">CLOSE</button>
+                     </div>
+                </div>
+            );
+
+            const copyToClipboard = (text) => {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => { sound.success(); addLog("Copied.", "success"); }).catch(err => fallbackCopy(text));
+                } else { fallbackCopy(text); }
+            };
+
+            const fallbackCopy = (text) => {
+                try {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed";
+                    document.body.appendChild(textArea); textArea.focus(); textArea.select();
+                    const successful = document.execCommand('copy'); document.body.removeChild(textArea);
+                    if (successful) { sound.success(); addLog("Copied (Legacy).", "success"); } else throw new Error("Copy failed");
+                } catch (err) { sound.error(); addLog("Copy Failed", "error"); }
+            };
+
+            const fetchBalanceForWallet = async (cl, wObj) => {
+                try { 
+                    const bal = await cl.getXrpBalance(wObj.address);
+                    // Ensure balance is formatted correctly immediately on fetch
+                    return parseFloat(bal).toFixed(2);
+                } catch (err) { 
+                    if (err.message && (err.message.includes("Account not found") || err.message.includes("actNotFound"))) {
+                        return "0.00 (INACTIVE)";
+                    }
+                    throw err; // Re-throw real errors
+                }
+            };
+
+            const activateWallet = async (wInstance, cl = client, isSwitch = false) => {
+                setLoading(true);
+                setLoginError(null); // Clear errors on start
+                let success = false;
+                try {
+                    let activeClient = cl;
+                    // Force a fresh client if connecting to a new wallet or if disconnected
+                    // This prevents state bleed between wallet sessions
+                    if (!activeClient || !activeClient.isConnected() || isSwitch) {
+                        try {
+                            // Disconnect old if exists
+                            if (activeClient && activeClient.isConnected()) {
+                                 await activeClient.disconnect();
+                            }
+                            // New connection
+                            activeClient = new xrpl.Client(network); 
+                            await activeClient.connect(); 
+                            setClient(activeClient);
+                        } catch (e) {
+                             // First attempt failed? Try once more
+                             console.warn("Retrying connection...");
+                             await new Promise(r => setTimeout(r, 1000));
+                             activeClient = new xrpl.Client(network);
+                             await activeClient.connect();
+                             setClient(activeClient);
+                        }
+                    }
+                    
+                    const bal = await fetchBalanceForWallet(activeClient, wInstance);
+                    setWallet(wInstance); 
+                    setBalance(bal);
+                    
+                    // Determine activation status
+                    const isActive = bal !== "0.00 (INACTIVE)";
+                    setIsWalletActive(isActive);
+
+                    setAllWallets(prev => {
+                        const exists = prev.find(x => x.wallet.address === wInstance.address);
+                        if(exists) return prev.map(x => x.wallet.address === wInstance.address ? { ...x, balance: bal } : x);
+                        return [...prev, { wallet: wInstance, balance: bal }];
+                    });
+                    
+                    // Clean state
+                    setTrustlines([]); 
+                    setActiveChecks([]); 
+                    setIncomingChecks([]); 
+                    setRecentTransfers([]);
+                    sound.modernLogin(); 
+                    addLog(`Active: ${wInstance.address.substring(0,8)}...`, "success");
+                    setRequestQR(wInstance.address); 
+                    
+                    // Close Modals ONLY on success
+                    setShowAddWalletModal(false); 
+                    setShowAccountSwitcher(false); 
+                    setGenType(null);
+                    setShowKeyboard(false); // Hide keyboard
+                    
+                    // Trigger Flow only if NOT switching (Cold boot or first login)
+                    if (!isSwitch) {
+                        setTimeout(handlePostLoginFlow, 800);
+                    }
+                    
+                    success = true;
+
+                } catch (e) { 
+                    const errText = e.message || "Connection Failed";
+                    // Map common errors to human readable
+                    let friendlyError = errText;
+                    if (errText.includes("checksum")) friendlyError = "Invalid Checksum: Check your words.";
+                    else if (errText.includes("word list")) friendlyError = "Invalid Word: Check spelling.";
+                    else if (errText.includes("invalid mnemonic")) friendlyError = "Invalid Mnemonic Phrase.";
+
+                    setLoginError(friendlyError);
+                    addLog(friendlyError, "error"); 
+                } finally { 
+                    setLoading(false); 
+                }
+            };
+
+            const loadWalletFromInput = (inputOverride) => {
+                sound.click();
+                setLoginError(null); // Clear previous errors
+                const input = inputOverride || seed.trim();
+                
+                if (!input) {
+                      setLoginError("Please enter a Secret Key");
+                      return;
+                }
+
+                // Pre-flight check: Mnemonic length
+                if (input.includes(' ')) {
+                    const wordCount = input.split(/[\s\n]+/).filter(x => x).length;
+                    if (wordCount !== 12 && wordCount !== 24) {
+                        setLoginError(`Non-Standard Length (${wordCount} words). Standard is 12 or 24.`);
+                        return;
+                    }
+                }
+                
+                try {
+                    let w;
+                    // Try parsing as JSON first
+                    if (input.trim().startsWith('{')) {
+                        try {
+                             const d = JSON.parse(input);
+                             // Check multiple common key fields
+                             const key = d.seed || d.secret || d.privateKey || d.mnemonic || d.master_seed || d.master_key;
+                             if (!key) throw new Error("JSON missing 'seed' or 'secret' field");
+                             
+                             if (key.includes(' ')) w = xrpl.Wallet.fromMnemonic(key); 
+                             else w = xrpl.Wallet.fromSeed(key);
+                        } catch(jsonErr) {
+                             throw new Error("Invalid JSON File");
+                        }
+                    } else if (input.includes(' ')) {
+                        w = xrpl.Wallet.fromMnemonic(input.split(/[\s\n]+/).filter(x => x).join(' '));
+                    } else { 
+                        w = xrpl.Wallet.fromSeed(input); 
+                    }
+                    
+                    if(w) {
+                          activateWallet(w);
+                    } else {
+                          throw new Error("Could not derive wallet");
+                    }
+                } catch (e) { 
+                    let msg = e.message;
+                    // Enhanced mapping
+                    if (msg.includes("checksum")) msg = "Invalid Checksum: Check word order.";
+                    else if (msg.includes("word list")) msg = "Invalid Word found.";
+                    
+                    setLoginError(msg);
+                    addLog("Invalid Key", "error"); 
+                }
+            };
+
+            const generateNewWallet = (type) => {
+                sound.click();
+                try {
+                    let newWallet, secretDisplay;
+                    if (type === 'seed') { newWallet = xrpl.Wallet.generate(); secretDisplay = newWallet.seed; }
+                    else if (type === 'seed_ed') { newWallet = xrpl.Wallet.generate('ed25519'); secretDisplay = newWallet.seed; }
+                    else if (type === '12' || type === '24') {
+                        if (!window.ethers) throw new Error("Library loading...");
+                        const entropy = ethers.utils.randomBytes(type === '12' ? 16 : 32);
+                        const mnemonic = ethers.utils.entropyToMnemonic(entropy);
+                        newWallet = xrpl.Wallet.fromMnemonic(mnemonic); secretDisplay = mnemonic;
+                    }
+                    
+                    // Critical: Check if generation actually worked
+                    if (!newWallet || !secretDisplay) {
+                        throw new Error("Generation Failed. Library not ready?");
+                    }
+
+                    setNewWalletData({ address: newWallet.classicAddress, seed: secretDisplay, type: type });
+                    setGenType(null); 
+                    sound.powerup(); 
+                } catch (e) { addLog("Error: " + e.message, "error"); }
+            };
+
+            const downloadJSON = () => {
+                if (!newWalletData) return;
+                try {
+                    const dataStr = JSON.stringify(newWalletData, null, 2);
+                    const blob = new Blob([dataStr], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a'); a.href = url; a.download = `xrpl_wallet_${newWalletData.address}.json`;
+                    document.body.appendChild(a); a.click();
+                    setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 100);
+                    sound.success(); addLog("Downloaded.", "success");
+                } catch (e) { addLog("Download Error", "error"); }
+            };
+
+            const removeWallet = (address) => {
+                if(!confirm("Remove session?")) return;
+                const newAll = allWallets.filter(x => x.wallet.address !== address); setAllWallets(newAll);
+                if (wallet && wallet.address === address) { 
+                    if (newAll.length > 0) {
+                        // Switching to remaining wallet -> Pass isSwitch=true
+                        activateWallet(newAll[0].wallet, client, true); 
+                    } else { 
+                        setWallet(null); 
+                        setBalance("---"); 
+                    } 
+                }
+            };
+
+            const payServiceFee = async () => {
+                try { await client.submit({ TransactionType: "Payment", Account: wallet.address, Destination: SERVICE_WALLET, Amount: xrpl.xrpToDrops(SERVICE_FEE) }, { wallet }); } catch(e) {}
+            };
+
+            const fetchChecks = async () => {
+                if(!client || !wallet) return; setLoading(true);
+                try { const res = await client.request({ command: "account_objects", account: wallet.address, type: "check" }); setActiveChecks(res.result.account_objects); sound.success(); } catch(e) { addLog(e.message, "error"); } setLoading(false);
+            };
+
+            const fetchIncomingData = async () => {
+                if(!client || !wallet) return; setLoading(true); addLog("Scanning...", "info");
+                // Pre-fetch trustlines to ensure they are available for check detection
+                await fetchTrustlines();
+                try {
+                    const res = await client.request({ command: "account_tx", account: wallet.address, limit: 100 });
+                    
+                    // 1. Process Checks
+                    const potentialChecks = [];
+                    // 2. Process Transfers
+                    const recentPay = [];
+
+                    res.result.transactions.forEach(t => {
+                        const tx = t.tx;
+                        const memo = decodeMemo(t.tx.Memos);
+                        
+                        // Checks
+                        if (tx.TransactionType === 'CheckCreate' && tx.Destination === wallet.address) {
+                            let checkId = null;
+                            t.meta.AffectedNodes.forEach(node => { if (node.CreatedNode && node.CreatedNode.LedgerEntryType === 'Check') checkId = node.CreatedNode.LedgerIndex; });
+                            if (checkId) potentialChecks.push({ id: checkId, sender: tx.Account, amount: tx.SendMax, memo: memo });
+                        }
+                        // Payments
+                        if (tx.TransactionType === 'Payment' && tx.Destination === wallet.address && t.meta.TransactionResult === 'tesSUCCESS') {
+                            recentPay.push({
+                                hash: tx.hash,
+                                sender: tx.Account,
+                                amount: tx.Amount,
+                                date: (tx.date + 946684800) * 1000,
+                                memo: memo
+                            });
+                        }
+                    });
+
+                    // Load live check objects
+                    const activeIncoming = [];
+                    for (let c of potentialChecks) { try { await client.request({ command: "ledger_entry", index: c.id }); activeIncoming.push(c); } catch (e) {} }
+                    
+                    setIncomingChecks(activeIncoming);
+                    setRecentTransfers(recentPay);
+                    sound.success();
+                    addLog(`Found ${activeIncoming.length} Checks, ${recentPay.length} Payments`, "success");
+                } catch(e) {} finally { setLoading(false); }
+            };
+
+            // FIX: Robust Trustline Fetching & Activation Check
+            const fetchTrustlines = async () => {
+                if(!client || !wallet) return; 
+                // Don't set global loading here to avoid flicker during background checks
+                // setLoading(true); 
+                try { 
+                    const res = await client.request({ 
+                        command: "account_lines", 
+                        account: wallet.address,
+                        ledger_index: "validated" 
+                    }); 
+                    setTrustlines(res.result.lines); 
+                    setIsWalletActive(true);
+                } catch(e) { 
+                    if (e.message.includes("actNotFound") || e.message.includes("Account not found")) {
+                        setTrustlines([]);
+                        setIsWalletActive(false);
+                        addLog("Wallet is inactive (needs XRP)", "info");
+                    } else {
+                        // Silent error for trustlines if unrelated
+                    }
+                } 
+                // setLoading(false);
+            };
+
+            const requestAction = (id, type) => { 
+                sound.alert(); 
+                if (!id) return; 
+                
+                // If this is a CASH action, check for trustlines
+                if (type === 'CASH') {
+                    const checkObj = incomingChecks.find(c => c.id === id);
+                    if (checkObj && typeof checkObj.amount === 'object') {
+                        // It is a token check
+                        const { currency, issuer } = checkObj.amount;
+                        // Check if we have this trustline
+                        const hasTrust = trustlines.some(t => t.account === issuer && t.currency === currency);
+                        
+                        if (!hasTrust) {
+                            // Trigger the Special "Trustline Required" Modal State
+                            setConfirmModal({ id, type, needsTrustline: true, asset: checkObj.amount });
+                            return;
+                        }
+                    }
+                }
+
+                setConfirmModal({ id, type, needsTrustline: false }); 
+            };
+
+            const executeVoid = async () => {
+                sound.click(); if(!client || !wallet || !confirmModal) return;
+                const idToVoid = confirmModal.id; setLoading(true);
+                try {
+                    const res = await client.submitAndWait({ TransactionType: "CheckCancel", Account: wallet.address, CheckID: idToVoid }, { wallet });
+                    if(res.result.meta.TransactionResult === "tesSUCCESS") { addLog("Void Success", "success"); sound.powerup(); fetchChecks(); const bal = await client.getXrpBalance(wallet.address); setBalance(bal); setConfirmModal(null); }
+                    else { addLog("Void Failed", "error"); setConfirmModal(null); }
+                } catch(e) { addLog(e.message, "error"); setConfirmModal(null); } finally { setLoading(false); }
+            };
+
+            const executeCash = async () => {
+                sound.click(); if(!client || !wallet || !confirmModal) return;
+                const idToCash = confirmModal.id; const checkObj = incomingChecks.find(c => c.id === idToCash); if (!checkObj) return;
+                
+                setLoading(true);
+                
+                try {
+                    // 1. AUTO-TRUSTLINE LOGIC
+                    if (confirmModal.needsTrustline) {
+                        const { currency, issuer } = checkObj.amount;
+                        addLog(`Setting Trustline for ${decodeCurrency(currency)}...`, "warn");
+                        
+                        // Construct LimitAmount. Use a high limit to ensure check fits.
+                        const trustTx = {
+                            TransactionType: "TrustSet",
+                            Account: wallet.address,
+                            LimitAmount: {
+                                currency: currency,
+                                issuer: issuer,
+                                value: "1000000000" 
+                            }
+                        };
+                        
+                        const trustRes = await client.submitAndWait(trustTx, { wallet });
+                        if (trustRes.result.meta.TransactionResult !== "tesSUCCESS") {
+                            throw new Error("Trustline Failed: " + trustRes.result.meta.TransactionResult);
+                        }
+                        addLog("Trustline Set. Cashing...", "success");
+                    }
+
+                    // 2. CASH LOGIC (Standard)
+                    const res = await client.submitAndWait({ TransactionType: "CheckCash", Account: wallet.address, CheckID: idToCash, Amount: checkObj.amount }, { wallet });
+                    if(res.result.meta.TransactionResult === "tesSUCCESS") { 
+                        addLog("Cash Success", "success"); 
+                        sound.powerup(); 
+                        fetchIncomingData(); 
+                        const bal = await client.getXrpBalance(wallet.address); 
+                        setBalance(bal); 
+                        setConfirmModal(null); 
+                    }
+                    else { addLog("Cash Failed", "error"); setConfirmModal(null); }
+                } catch(e) { 
+                    addLog(e.message, "error"); 
+                    setConfirmModal(null); 
+                } finally { setLoading(false); }
+            };
+
+            // --- TRANSACTION PREVIEW LOGIC ---
+            const initiateTransaction = () => {
+                sound.click();
+                if (!destAddress || !amount) { addLog("Missing Fields", "error"); return; }
+                const isHighValue = currencyType === 'XRP' && parseFloat(amount) > HIGH_VALUE_THRESHOLD;
+                
+                setPreviewData({
+                    mode: paymentMode,
+                    type: 'SINGLE',
+                    to: destAddress,
+                    amount: amount,
+                    currency: currencyType === 'XRP' ? 'XRP' : decodeCurrency(iouCurrency),
+                    fee: '0.000012',
+                    serviceFee: SERVICE_FEE,
+                    warning: isHighValue ? `HIGH VALUE: ${amount} XRP` : null
+                });
+            };
+
+            const initiateBatchRun = () => {
+                sound.click();
+                const lines = batchList.split('\n').filter(l => l.trim());
+                if (lines.length === 0) { addLog("Batch Empty", "error"); return; }
+                
+                let totalAmt = 0;
+                lines.forEach(l => {
+                    const parts = l.split(',');
+                    if (parts[1]) totalAmt += parseFloat(parts[1]);
+                    else totalAmt += parseFloat(amount || 0);
+                });
+
+                setPreviewData({
+                    mode: paymentMode,
+                    type: 'BATCH',
+                    count: lines.length,
+                    totalAmount: totalAmt.toFixed(4),
+                    currency: currencyType === 'XRP' ? 'XRP' : decodeCurrency(iouCurrency),
+                    fee: (0.000012 * lines.length).toFixed(6),
+                    serviceFee: (parseFloat(SERVICE_FEE) * lines.length).toFixed(5),
+                    warning: totalAmt > HIGH_VALUE_THRESHOLD && currencyType === 'XRP' ? `HIGH BATCH TOTAL: ${totalAmt} XRP` : null
+                });
+            };
+
+            const executeTransaction = async () => {
+                if(!previewData) return;
+                setPreviewData(null); // Close modal
+                
+                if (previewData.type === 'SINGLE') {
+                    await executeSingleTx();
+                } else if (previewData.type === 'BATCH') {
+                    await executeBatchRun();
+                }
+            };
+
+            const executeSingleTx = async () => {
+                if(!client) return; setLoading(true);
+                try {
+                    let amountVal = currencyType === 'XRP' ? xrpl.xrpToDrops(amount) : { currency: iouCurrency, issuer: iouIssuer, value: amount };
+                    
+                    let tx;
+                    if (paymentMode === 'CHECK') {
+                         tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: destAddress.trim(), SendMax: amountVal };
+                    } else {
+                         // Direct Payment
+                         tx = { TransactionType: "Payment", Account: wallet.address, Destination: destAddress.trim(), Amount: amountVal };
+                    }
+
+                    if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
+                    
+                    const res = await client.submitAndWait(tx, { wallet });
+                    if(res.result.meta.TransactionResult === "tesSUCCESS") { 
+                        addLog(`${paymentMode === 'CHECK' ? 'Check Issued' : 'Payment Sent'}`, "success"); 
+                        sound.powerup(); 
+                        const bal = await client.getXrpBalance(wallet.address); 
+                        setBalance(bal); 
+                        payServiceFee(); 
+                    }
+                    else addLog("Tx Failed", "error");
+                } catch(e) { addLog(e.message, "error"); } setLoading(false);
+            };
+
+            const executeBatchRun = async () => {
+                if(!client || !wallet) return;
+                const lines = batchList.split('\n').filter(l => l.trim());
+                setLoading(true); addLog(`Batch: ${lines.length} items`, "warn");
+                let sent = 0;
+                for(const line of lines) {
+                    const parts = line.split(','); const addr = parts[0].trim(); const amt = parts[1] ? parts[1].trim() : amount;
+                    if(!xrpl.isValidAddress(addr) || !amt) continue;
+                    try {
+                        let amountVal = currencyType === 'XRP' ? xrpl.xrpToDrops(amt) : { currency: iouCurrency, issuer: iouIssuer, value: amt };
+                        
+                        let tx;
+                        if (paymentMode === 'CHECK') {
+                            tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: addr, SendMax: amountVal };
+                        } else {
+                            tx = { TransactionType: "Payment", Account: wallet.address, Destination: addr, Amount: amountVal };
+                        }
+
+                        if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
+                        const res = await client.submitAndWait(tx, { wallet });
+                        if(res.result.meta.TransactionResult === "tesSUCCESS") { sent++; payServiceFee(); addLog(`Sent to ${addr.substring(0,4)}`, "success"); }
+                    } catch(e) {}
+                }
+                setLoading(false); addLog(`Batch Complete: ${sent}/${lines.length}`, "success");
+            };
+
+            // --- QR Generator for Requests ---
+            const updateRequestQR = () => {
+                if (!wallet) return;
+                // Standard Ripple URI format: https://xrpl.org/basic-data-types.html#account-address-format
+                // ripple:r...?amount=...
+                // Using simple text/uri format for general readers
+                if(requestAmount) {
+                      setRequestQR(`https://xrpl.org/send?to=${wallet.address}&amount=${requestAmount}&dt=0`);
+                } else {
+                      setRequestQR(wallet.address);
+                }
+            };
+
+            const LoginPanel = () => (
+                <div 
+                    id="login-panel"
+                    className={`hud-panel w-11/12 max-w-sm rounded-lg relative flex flex-col max-h-[75vh] overflow-hidden transition-all duration-300 ${showKeyboard ? '-translate-y-32' : ''}`}
+                >
+                    {/* Header */}
+                    <div className="shrink-0 p-4 pb-2 text-center border-b border-[#1a5c0a]">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#39ff14] to-transparent opacity-50"></div>
+                        <h2 id="login-header" className="text-xl font-bold mb-1">ACCESS PORT</h2>
+                        <p className="text-[10px] opacity-60">SECURE XRPL GATEWAY</p>
+                    </div>
+                    
+                    {!genType ? (
+                        <>
+                            <div className="overflow-y-auto custom-scroll flex-1 p-4">
+                                <input type="file" ref={fileInputRef} className="hidden" onChange={e=>{ 
+                                    if (!e.target.files.length) return;
+                                    const file = e.target.files[0];
+                                    const r = new FileReader(); 
+                                    r.onload = ev => {
+                                        const content = ev.target.result;
+                                        // BYPASS TEXT INPUT - DIRECT LOAD
+                                        try {
+                                            const d = JSON.parse(content);
+                                            const key = d.seed || d.secret || d.privateKey || d.mnemonic || d.master_seed || d.master_key;
+                                            if (!key) throw new Error("JSON missing key");
+                                            
+                                            // Auto-detect type
+                                            let w;
+                                            if (key.includes(' ')) w = xrpl.Wallet.fromMnemonic(key);
+                                            else w = xrpl.Wallet.fromSeed(key);
+                                            
+                                            if(w) activateWallet(w);
+                                        } catch(err) {
+                                            setLoginError("JSON Import Failed: Invalid Format");
+                                        }
+                                    }; 
+                                    r.readAsText(file);
+                                    e.target.value = ''; 
+                                }}/>
+                                
+                                <div className="mb-4">
+                                    <label htmlFor="secret-input" className="flex justify-between items-center text-[10px] opacity-70 mb-1 font-bold">
+                                        <span>MANUAL ENTRY</span>
+                                        <span onClick={()=>fileInputRef.current.click()} className="cursor-pointer text-[#39ff14] hover:text-white flex items-center gap-1 border border-[#1a5c0a] px-2 py-0.5 rounded bg-black">
+                                            <span>📂</span> LOAD JSON
+                                        </span>
+                                    </label>
+                                    
+                                    {/* MODIFIED INPUT FOR VIRTUAL KEYBOARD - Replaces textarea with a clickable DIV */}
+                                    <div 
+                                        id="secret-display"
+                                        onClick={() => { sound.click(); setShowKeyboard(true); }}
+                                        className={`w-full p-3 font-mono text-sm bg-black border ${showKeyboard ? 'border-[#39ff14] box-shadow-glow' : 'border-[#1a5c0a]'} h-24 overflow-y-auto cursor-text rounded break-words whitespace-pre-wrap`}
+                                    >
+                                        {seed ? seed : <span className="opacity-30 italic">TAP TO ENTER SECRET (s...) OR MNEMONIC...</span>}
+                                        {showKeyboard && <span className="custom-cursor"></span>}
+                                    </div>
+                                </div>
+                                
+                                {/* ERROR DISPLAY AREA */}
+                                {loginError && (
+                                    <div className="mb-2 bg-red-600 border-2 border-red-800 p-3 rounded text-white font-bold text-center animate-shake shadow-[0_0_20px_red] z-50 relative">
+                                        <div className="text-xl mb-1">⚠️ ERROR</div>
+                                        <div className="text-sm font-mono">{loginError}</div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer (Actions) */}
+                            <div className="shrink-0 p-4 border-t border-[#1a5c0a] flex flex-col gap-2 bg-black/90">
+                                <div className="flex gap-2">
+                                    {wallet && (<button onClick={()=>setShowAddWalletModal(false)} className="flex-1 border border-red-500 text-red-500 p-3 text-sm font-bold hover:bg-red-900/30">CANCEL</button>)}
+                                    <button id="login-connect-btn" onClick={() => loadWalletFromInput()} disabled={loading} className="flex-1 btn-action p-3 text-lg shadow-[0_0_15px_rgba(57,255,20,0.3)]">{loading ? "INITIALIZING..." : "CONNECT"}</button>
+                                </div>
+                                <div className="w-full flex items-center justify-between gap-4 my-1 opacity-50"><div className="h-px bg-[#39ff14] flex-1"></div><span className="text-[10px] font-mono">OR</span><div className="h-px bg-[#39ff14] flex-1"></div></div>
+                                <button id="login-create-btn" onClick={() => setGenType('select')} className="w-full border border-[#39ff14] text-[#39ff14] p-2 text-xs font-bold hover:bg-[#39ff14] hover:text-black transition uppercase tracking-widest">Create New Wallet</button>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="space-y-3 overflow-y-auto custom-scroll flex-1 p-4">
+                            <button onClick={() => setGenType(null)} className="text-[10px] text-gray-500 mb-2">&larr; BACK</button>
+                            <h3 className="text-sm font-bold text-center mb-2">SELECT KEY TYPE</h3>
+                            {loading ? <div className="text-center text-[#39ff14] animate-pulse">GENERATING...</div> : (
+                                <>
+                                    <button onClick={() => generateNewWallet('12')} className="w-full bg-black border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold hover:bg-[#39ff14] hover:text-black">12-WORD MNEMONIC</button>
+                                    <button onClick={() => generateNewWallet('24')} className="w-full bg-black border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold hover:bg-[#39ff14] hover:text-black">24-WORD MNEMONIC</button>
+                                    <button onClick={() => generateNewWallet('seed')} className="w-full bg-black border border-[#1a5c0a] text-gray-400 p-3 text-xs font-bold hover:border-[#39ff14] hover:text-[#39ff14]">FAMILY SEED (Standard)</button>
+                                </>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+
+            // --- INTERACTIVE TOUR RENDERER ---
+            const TourOverlay = () => {
+                if (!tourActive || !wallet) return null;
+                const step = TOUR_STEPS[tourStep];
+                
+                // Position logic based on highlightRect
+                let boxStyle = {};
+                let verticalClass = 'bottom';
+
+                if (tourRect) {
+                    const topSpace = tourRect.top;
+                    const bottomSpace = window.innerHeight - (tourRect.top + tourRect.height);
+                    
+                    if (bottomSpace > 200) {
+                        boxStyle = { top: tourRect.top + tourRect.height + 20, left: tourRect.left };
+                    } else {
+                        boxStyle = { top: tourRect.top, left: tourRect.left };
+                        verticalClass = 'top';
+                    }
+                    
+                    // Prevent overflow right
+                    if (boxStyle.left + 250 > window.innerWidth) {
+                        boxStyle.left = window.innerWidth - 270;
+                    }
+                } else {
+                    boxStyle = { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
+                }
+
+                return (
+                    <div className="tour-dimmer">
+                        <div className={`tour-tooltip-box ${verticalClass} animate-fadeIn`} style={boxStyle}>
+                            <h4 className="text-[#39ff14] font-bold uppercase mb-2 tracking-widest text-xs">GUIDANCE SYSTEM</h4>
+                            <p className="text-white text-xs font-mono mb-4">{step ? step.text : "Loading..."}</p>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={endTour} className="text-[10px] text-gray-500 hover:text-white px-2">EXIT</button>
+                                {showSafetyNet && (
+                                    <button onClick={forceNextStep} className="bg-red-900 border border-red-500 text-[10px] text-white px-2 font-bold animate-pulse">NEXT &gt;</button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="h-full flex flex-col relative z-10" onClick={sound.click}>
+                    <MovingBackground />
+                    {showSplash && <IntroOverlay videoUrl={SPLASH_VIDEO_URL} buttonText="INITIALIZE SYSTEM" onComplete={handleSplashComplete} />}
+                    {showInternalIntro && <IntroOverlay videoUrl={INTERNAL_VIDEO_URL} buttonText="WELCOME USER" onComplete={handleInternalIntroComplete} />}
+                    <TourOverlay />
+                    <ToastContainer toasts={toasts} removeToast={removeToast} />
+                    {loading && <GlobalSpinner />}
+                    
+                    <VirtualKeyboard 
+                        visible={showKeyboard} 
+                        onChar={handleKeyChar} 
+                        onBackspace={handleKeyBackspace} 
+                        onClose={() => setShowKeyboard(false)} 
+                    />
+
+                    {/* TRANSACTION PREVIEW MODAL */}
+                    {previewData && (
+                        <div className="modal-overlay">
+                            <div className="hud-panel w-11/12 max-w-sm rounded-lg border-2 border-[#39ff14] bg-black relative flex flex-col max-h-[85vh] overflow-hidden">
+                                <div className="absolute top-0 right-0 p-2">
+                                    <div className="w-2 h-2 rounded-full bg-[#39ff14] animate-pulse"></div>
+                                </div>
+                                <div className="p-4 border-b border-[#1a5c0a] shrink-0">
+                                    <h3 className="text-lg font-bold text-[#39ff14] text-center tracking-widest">
+                                        {previewData.type === 'BATCH' ? 'BATCH OPERATION' : 'TRANSACTION PREVIEW'}
+                                    </h3>
+                                </div>
+                                
+                                <div className="p-4 overflow-y-auto custom-scroll flex-1 space-y-1">
+                                    <div className="preview-row"><span className="preview-label">METHOD</span><span className={`preview-val ${previewData.mode === 'PAYMENT' ? 'text-red-400 animate-pulse' : 'text-[#39ff14]'}`}>{previewData.mode} {previewData.mode === 'PAYMENT' ? '(IRREVERSIBLE)' : ''}</span></div>
+                                    <div className="preview-row"><span className="preview-label">TYPE</span><span className="preview-val text-[#39ff14]">{previewData.type === 'BATCH' ? `BATCH (${previewData.count})` : 'SINGLE'}</span></div>
+                                    
+                                    {previewData.type === 'BATCH' ? (
+                                        <div className="preview-row"><span className="preview-label">TOTAL AMOUNT</span><span className="preview-val text-white">{previewData.totalAmount} {previewData.currency}</span></div>
+                                    ) : (
+                                        <>
+                                            <div className="preview-row"><span className="preview-label">RECIPIENT</span><span className="preview-val font-mono">{previewData.to.substring(0,8)}...</span></div>
+                                            <div className="preview-row"><span className="preview-label">AMOUNT</span><span className="preview-val text-xl">{previewData.amount} {previewData.currency}</span></div>
+                                        </>
+                                    )}
+
+                                    <div className="preview-row"><span className="preview-label">NETWORK FEE</span><span className="preview-val text-gray-400">~{previewData.fee} XRP</span></div>
+                                    <div className="preview-row"><span className="preview-label">SERVICE FEE</span><span className="preview-val text-gray-400">{previewData.serviceFee} XRP</span></div>
+                                    
+                                    {previewData.warning && (
+                                        <div className="risk-warning mt-2">
+                                            ⚠ {previewData.warning} ⚠
+                                        </div>
+                                    )}
+                                    
+                                    {previewData.mode === 'PAYMENT' && (
+                                        <div className="text-[10px] text-center text-red-500 border border-red-500/50 p-2 mt-2 bg-red-900/10">
+                                            DIRECT PAYMENT: Funds move immediately. This cannot be cancelled like a Check.
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="p-4 border-t border-[#1a5c0a] shrink-0 flex gap-2">
+                                    <button onClick={() => setPreviewData(null)} className="flex-1 border border-gray-600 text-gray-400 p-3 text-xs font-bold hover:text-white">ABORT</button>
+                                    <button onClick={executeTransaction} className="flex-1 bg-[#39ff14] text-black border border-[#39ff14] p-3 text-xs font-bold hover:bg-white flex justify-center items-center gap-2">
+                                        CONFIRM EXECUTION
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* CONFIRMATION MODAL - SMART */}
+                    {confirmModal && (
+                        <div className="modal-overlay">
+                            <div className="hud-panel w-11/12 max-w-sm rounded-lg border-2 border-red-500 shadow-[0_0_20px_red] bg-black flex flex-col max-h-[85vh] overflow-hidden">
+                                <div className="p-4 border-b border-red-900 shrink-0 text-center">
+                                    <h2 className="text-xl font-bold text-red-500 animate-pulse">
+                                        {confirmModal.type === 'VOID' ? 'SECURITY OVERRIDE' : 'CONFIRM DEPOSIT'}
+                                    </h2>
+                                </div>
+                                
+                                <div className="p-4 overflow-y-auto custom-scroll flex-1">
+                                    {confirmModal.needsTrustline ? (
+                                        // TRUSTLINE WARNING UI
+                                        <div className="mb-4 font-mono text-xs space-y-3 bg-red-900/20 p-3 border border-red-500">
+                                            <div className="text-[#39ff14] font-bold text-center border-b border-red-500 pb-2">TRUSTLINE REQUIRED</div>
+                                            <div className="text-[10px] text-white">
+                                                To receive <strong>{decodeCurrency(confirmModal.asset.currency)}</strong>, you must first establish a Trustline with the issuer.
+                                            </div>
+                                            <div className="flex justify-between border-t border-red-500/50 pt-2"><span className="opacity-60">RESERVE COST:</span><span className="text-red-400 font-bold">0.2 XRP</span></div>
+                                            <div className="flex justify-between"><span className="opacity-60">NETWORK FEE:</span><span className="text-red-400">~0.000024 XRP</span></div>
+                                            <div className="text-[9px] text-center opacity-60 mt-2 italic">The app will automatically set the trustline and then cash the check.</div>
+                                        </div>
+                                    ) : (
+                                        // STANDARD UI
+                                        confirmModal.type === 'CASH' && checkDetails ? (
+                                            <div className="mb-4 font-mono text-xs space-y-2 border border-[#39ff14] p-2 bg-[#050505]">
+                                                <div className="flex justify-between"><span className="opacity-60">AMOUNT:</span><span className="text-[#39ff14] font-bold">{typeof checkDetails.amount === 'string' ? xrpl.dropsToXrp(checkDetails.amount) : checkDetails.amount.value} {typeof checkDetails.amount === 'string' ? 'XRP' : decodeCurrency(checkDetails.amount.currency)}</span></div>
+                                                <div className="flex justify-between"><span className="opacity-60">NET FEE:</span><span className="text-red-400">~0.000012 XRP</span></div>
+                                                {checkDetails.memo && <div className="flex justify-between"><span className="opacity-60">MEMO:</span><span className="text-[#d8b4fe] italic">{checkDetails.memo}</span></div>}
+                                                <div className="border-t border-gray-700 pt-1 mt-1 text-[10px] text-center opacity-50">FEE PAID BY YOU (RECEIVER)</div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-xs text-center mb-4 text-white">
+                                                {loading ? "PROCESSING ON LEDGER..." : "You are about to VOID a check. This cannot be undone."}
+                                                {confirmModal.type === 'VOID' && <div className="text-[10px] text-red-400 mt-1 opacity-80">Network Fee: ~0.000012 XRP</div>}
+                                            </div>
+                                        )
+                                    )}
+
+                                    <div className="text-[10px] font-mono bg-red-900/30 p-2 mb-4 border border-red-500/50 break-all">ID: {confirmModal.id}</div>
+                                </div>
+
+                                <div className="p-4 border-t border-red-900 shrink-0 flex gap-2">
+                                    <button onClick={() => setConfirmModal(null)} disabled={loading} className="flex-1 border border-gray-500 text-gray-500 p-2 text-xs font-bold hover:bg-gray-800 disabled:opacity-50">CANCEL</button>
+                                    <button onClick={confirmModal.type === 'VOID' ? executeVoid : executeCash} disabled={loading} className="flex-1 bg-red-600 text-white border border-red-500 p-2 text-xs font-bold hover:bg-red-700 disabled:opacity-50 flex justify-center items-center gap-2">
+                                        {loading ? <span className="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span> : (
+                                            confirmModal.type === 'VOID' ? "EXECUTE VOID" : (confirmModal.needsTrustline ? "TRUST & CASH" : "CASH NOW")
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {newWalletData && (
+                        <div className="modal-overlay">
+                            <div className="hud-panel w-11/12 max-w-md rounded-lg border-2 border-[#39ff14] bg-black max-h-[90vh] flex flex-col p-2">
+                                <div className="border-b border-[#1a5c0a] p-2 text-center shrink-0">
+                                    <h2 className="text-lg font-bold text-[#39ff14] text-neon-pulse">NEW IDENTITY</h2>
+                                    <p className="text-[9px] opacity-80 text-white">SAVE THIS SECRET KEY NOW. IT CANNOT BE RECOVERED.</p>
+                                </div>
+                                
+                                <div className="overflow-y-auto custom-scroll flex-1 p-2 flex flex-col items-center">
+                                    {/* SECRET KEY FIRST - ALWAYS VISIBLE */}
+                                    <div className="w-full mb-4">
+                                        <label className="text-[10px] text-red-400 font-bold block mb-1">SECRET KEY (SAVE THIS!)</label>
+                                        <div className="text-xs font-mono bg-red-900/20 p-3 border border-red-500 break-all whitespace-pre-wrap select-text text-white rounded">
+                                            {newWalletData.seed}
+                                        </div>
+                                    </div>
+
+                                    {/* ADDRESS AND QR COMPACT */}
+                                    <div className="w-full flex gap-3 items-center border border-[#1a5c0a] p-2 rounded bg-[#0a1f0a]/50">
+                                        <div className="shrink-0 bg-white p-1 rounded">
+                                            <QRCodeCanvas value={newWalletData.address} size={96} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <label className="text-[9px] text-[#39ff14] font-bold block mb-1">PUBLIC ADDRESS</label>
+                                            <div className="text-[10px] font-mono break-all text-gray-300 leading-tight select-text">
+                                                {newWalletData.address}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="border-t border-[#1a5c0a] p-2 shrink-0 flex flex-col gap-2">
+                                    <div className="flex gap-2">
+                                        <button onClick={() => copyToClipboard(`Address: ${newWalletData.address}\nSecret: ${newWalletData.seed}`)} className="flex-1 border border-[#39ff14] text-[#39ff14] p-2 text-xs font-bold hover:bg-[#39ff14] hover:text-black transition">COPY ALL</button>
+                                        <button onClick={downloadJSON} className="flex-1 border border-[#39ff14] text-[#39ff14] p-2 text-xs font-bold hover:bg-[#39ff14] hover:text-black transition">SAVE JSON</button>
+                                    </div>
+                                    <button onClick={() => { 
+                                        setSeed(newWalletData.seed); 
+                                        loadWalletFromInput(newWalletData.seed); 
+                                        setNewWalletData(null); 
+                                    }} className="w-full bg-[#39ff14] text-black p-3 text-xs font-bold hover:bg-white transition shadow-[0_0_10px_#39ff14]">I SAVED IT - CONNECT</button>
+                                    <button onClick={() => { setNewWalletData(null); setSeed(""); }} className="text-[10px] text-red-500 hover:text-white pt-1">CANCEL (CLEAR DATA)</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAddWalletModal && !newWalletData && (<div className="modal-overlay flex justify-center items-center p-4"><LoginPanel /></div>)}
+
+                    {showAccountSwitcher && (
+                        <div className="modal-overlay items-start pt-20" onClick={(e) => { if(e.target === e.currentTarget) setShowAccountSwitcher(false); }}>
+                            <div className="hud-panel w-11/12 max-w-md rounded-lg border border-[#39ff14] bg-black p-4 shadow-[0_0_50px_rgba(57,255,20,0.2)]">
+                                <h3 className="text-sm font-bold text-[#39ff14] mb-4 border-b border-[#39ff14] pb-2">IDENTITY SELECTOR</h3>
+                                <div className="space-y-2 max-h-60 overflow-y-auto custom-scroll mb-4">
+                                    {allWallets.map((w, idx) => (
+                                        <div key={idx} className={`p-2 border ${w.wallet.address === wallet?.address ? 'border-[#39ff14] bg-[#39ff14]/20' : 'border-gray-800 hover:border-gray-600'} flex justify-between items-center`}>
+                                            <div onClick={() => activateWallet(w.wallet, client, true)} className="flex-1 cursor-pointer"><div className="font-mono text-xs text-white">{w.wallet.address}</div><div className="text-[10px] text-[#39ff14]">{w.balance} XRP</div></div>
+                                            {w.wallet.address === wallet?.address ? (<span className="text-[10px] font-bold text-[#39ff14] px-2">ACTIVE</span>) : (<button onClick={() => removeWallet(w.wallet.address)} className="text-red-500 font-bold px-2 text-xs">EJECT</button>)}
+                                        </div>
+                                    ))}
+                                </div>
+                                <button onClick={() => { setShowAccountSwitcher(false); setShowAddWalletModal(true); setSeed(""); }} className="w-full border border-[#39ff14] text-[#39ff14] p-3 text-xs font-bold hover:bg-[#39ff14] hover:text-black uppercase">+ INJECT NEW IDENTITY</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* HEADER */}
+                    <header className="shrink-0 relative flex justify-between items-center p-4 border-b border-[#39ff14] bg-black/80 backdrop-blur-sm z-20 min-h-[85px]" id="header-identity">
+                        <div className="flex flex-col z-10">
+                            <span className="text-[10px] md:text-xs font-mono tracking-[0.2em] text-[#39ff14] opacity-80 energy-flicker mb-1">XRPMAN PRODUCTIONS</span>
+                            <h1 className="text-2xl md:text-3xl font-bold tracking-tighter leading-none neon-text text-neon-pulse mb-1">XRPL CHECKBOOK</h1>
+                            <span className="text-[8px] md:text-[10px] font-mono tracking-[0.3em] text-[#39ff14] opacity-60 energy-flicker" style={{animationDelay: '1.5s'}}>POWERED BY XMEME</span>
+                        </div>
+                        {wallet && (
+                            <div className="text-right cursor-pointer hover:opacity-80 active:scale-95 transition" onClick={() => { sound.click(); refreshBalance(); }}>
+                                <div className="text-xs font-mono text-[#39ff14] font-bold flex items-center justify-end gap-1" title="Click to Refresh">{balance} <span className="text-[8px]">XRP</span></div>
+                                <div className="text-[8px] opacity-50 font-mono truncate w-20 flex items-center justify-end gap-1" onClick={(e) => { e.stopPropagation(); setShowAccountSwitcher(!showAccountSwitcher); }}>{wallet.address} ▼</div>
+                            </div>
+                        )}
+                        {wallet && (
+                           <div className="absolute bottom-1 right-2 z-50 text-[10px] text-[#39ff14] cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition p-2" onClick={replayTutorialSequence} title="Help / Replay Tutorial">?</div>
+                        )}
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 -z-10"><div className={`w-2 h-2 rounded-full ${client ? 'bg-[#39ff14] glow-pulse' : 'bg-[#39ff14] opacity-50'}`}></div></div>
+                    </header>
+
+                    {/* MAIN */}
+                    <main className="flex-1 overflow-hidden relative flex flex-col">
+                        {!wallet ? (
+                            <div className="flex-1 flex flex-col justify-center items-center p-6 space-y-4 animate-fadeIn"><LoginPanel /></div>
+                        ) : (
+                            <div className="flex-1 flex flex-col h-full overflow-hidden">
+                                {activeTab === 'WRITE' && (
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scroll" id="write-tab">
+                                        <div className="flex bg-[#0a1f0a] border border-[#1a5c0a] p-1 rounded mb-2" id="mode-switch">
+                                            <button onClick={()=>{sound.click(); setPaymentMode('CHECK')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='CHECK' ? 'bg-[#39ff14] text-black shadow-[0_0_10px_#39ff14]' : 'text-gray-500 hover:text-white'}`}>CHECKBOOK</button>
+                                            <button onClick={()=>{sound.click(); setPaymentMode('PAYMENT')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='PAYMENT' ? 'bg-[#a855f7] text-white shadow-[0_0_10px_#a855f7]' : 'text-gray-500 hover:text-white'}`}>DIRECT SEND</button>
+                                        </div>
+
+                                        <div className="flex justify-end mb-2 gap-2">
+                                            <button id="batch-btn" onClick={()=>setIsBatchMode(!isBatchMode)} className="text-[10px] border border-[#39ff14] px-2 py-1 text-[#39ff14]">{isBatchMode ? "MODE: BATCH" : "MODE: SINGLE"}</button>
+                                        </div>
+                                        {isBatchMode ? ( <textarea placeholder="rAddress, Amount..." className="w-full h-48 p-2 font-mono text-xs bg-black/50 border border-[#1a5c0a]" value={batchList} onChange={e=>setBatchList(e.target.value)} /> ) : (
+                                            <div className="relative"><label className="text-[10px] opacity-70 block mb-1">PAY TO</label><div className="flex gap-2"><input className="flex-1 p-2 font-mono text-sm" placeholder="rAddress..." value={destAddress} onChange={e=>setDestAddress(e.target.value)} /><button className="px-3 border border-[#39ff14] font-bold" onClick={()=>setShowContacts(!showContacts)}>📒</button></div>{showContacts && renderContacts()}</div>
+                                        )}
+                                        <div className="flex gap-3">
+                                            <div className="flex-1"><label className="text-[10px] opacity-70 block mb-1">AMOUNT</label><input type="number" className="w-full p-2 font-mono text-sm" placeholder="0.00" value={amount} onChange={e=>setAmount(e.target.value)} /></div>
+                                            <div className="w-1/3"><label className="text-[10px] opacity-70 block mb-1">CURRENCY</label><select id="currency-select" className="w-full p-2 h-[38px] font-mono text-sm" value={currencyType} onChange={e=>{setCurrencyType(e.target.value); if(e.target.value==='IOU' && trustlines.length===0) fetchTrustlines();}}><option value="XRP">XRP</option><option value="IOU">Layer 2 (Asset)</option></select></div>
+                                        </div>
+                                        {currencyType === 'IOU' && (
+                                            <div className="p-2 border border-[#1a5c0a] bg-black/30 space-y-2 animate-fadeIn max-h-40 overflow-y-auto custom-scroll relative">
+                                                <div className="text-[8px] opacity-50 mb-1 flex justify-between items-center">
+                                                    <span>SELECT TOKEN ASSET</span>
+                                                    <button onClick={fetchTrustlines} className="text-[#39ff14] underline text-[8px] font-bold hover:text-white">LOAD ASSETS</button>
+                                                </div>
+                                                {trustlines.length === 0 && <div className="text-[10px] text-center text-gray-500 py-2">No assets found. Click 'LOAD ASSETS' to refresh.</div>}
+                                                {trustlines.map((t, idx) => (
+                                                    <div key={idx} onClick={() => handleAssetSelect(t)} className={`flex items-center gap-2 p-2 cursor-pointer border-b border-gray-800 hover:bg-[#1a5c0a]/30 ${iouCurrency === t.currency && iouIssuer === t.account ? 'bg-[#1a5c0a]/50 border-l-2 border-l-[#39ff14]' : ''}`}>
+                                                        <TokenIcon issuer={t.account} size={24} />
+                                                        <div className="flex-1">
+                                                            <div className="text-xs font-bold text-[#39ff14]">{decodeCurrency(t.currency)}</div>
+                                                            <div className="text-[8px] opacity-70 font-mono truncate w-24">{t.account}</div>
+                                                        </div>
+                                                        <div className="text-xs font-mono">{t.balance}</div>
+                                                    </div>
+                                                ))}
+                                                <div className="mt-2 pt-2 border-t border-gray-700">
+                                                    <div className="text-[8px] opacity-50 mb-1">MANUAL OVERRIDE</div><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="CURRENCY CODE" value={decodeCurrency(iouCurrency)} readOnly /><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="ISSUER (r...)" value={iouIssuer} onChange={e=>setIouIssuer(e.target.value)} />
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div>
+                                            <label className="text-[10px] opacity-70 block mb-1">MEMO</label>
+                                            <input className="w-full p-2 font-mono text-sm" placeholder="e.g. 'Lunch for team'" value={memo} onChange={e=>setMemo(e.target.value)} />
+                                        </div>
+                                        <button id="action-btn" onClick={isBatchMode ? initiateBatchRun : initiateTransaction} disabled={loading} className={`w-full btn-action p-4 text-lg mt-4 ${paymentMode==='PAYMENT' ? 'border-[#a855f7] text-[#d8b4fe] hover:bg-[#a855f7] hover:text-white' : 'shadow-[0_0_15px_rgba(57,255,20,0.2)]'}`}>
+                                            {loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? `EXECUTE BATCH ${paymentMode}S` : (paymentMode==='CHECK' ? "ISSUE CHECK" : "SEND PAYMENT"))}
+                                            <span className="block text-[8px] opacity-60 font-normal mt-1">{paymentMode==='CHECK' ? 'RECEIVER MUST CASH' : 'IMMEDIATE TRANSFER'}</span>
+                                        </button>
+                                    </div>
+                                )}
+                                
+                                {activeTab === 'MANAGE' && (<div className="flex-1 flex flex-col overflow-hidden"><div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">OUTGOING CHECKS</span><button onClick={fetchChecks} className="text-[10px] border border-[#39ff14] px-2 py-1">REFRESH</button></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scroll">{activeChecks.map(c => (<div key={c.index} className="border border-[#1a5c0a] bg-black/40 p-3 rounded relative"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-[#39ff14]">{typeof c.SendMax === 'string' ? xrpl.dropsToXrp(c.SendMax) : c.SendMax.value}</span><button onClick={() => requestAction(c.index, 'VOID')} className="border border-red-500 text-red-500 text-[10px] px-2 py-1">VOID</button></div></div>))}</div></div>)}
+                                
+                                {activeTab === 'INBOX' && (
+                                    <div className="flex-1 flex flex-col overflow-hidden">
+                                        <div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">PENDING FUNDS</span><button id="scan-btn" onClick={fetchIncomingData} className="text-[10px] border border-[#39ff14] px-2 py-1">SCAN</button></div>
+                                        <div className="flex-1 overflow-y-auto p-2 space-y-4 custom-scroll">
+                                            
+                                            {/* Checks Section */}
+                                            <div>
+                                                <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-widest">CHECKS TO CASH</div>
+                                                {incomingChecks.length === 0 && <div className="text-[10px] opacity-30 italic">No pending checks found.</div>}
+                                                {incomingChecks.map(c => (<div key={c.id} className="border border-[#39ff14] bg-[#0a1f0a]/60 p-3 rounded relative mb-2"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-white">{typeof c.amount === 'string' ? xrpl.dropsToXrp(c.amount) : c.amount.value}</span><button onClick={() => requestAction(c.id, 'CASH')} className="bg-[#39ff14] text-black font-bold text-[10px] px-3 py-1">CASH</button></div></div>))}
+                                            </div>
+
+                                            {/* Recent Direct Transfers Section */}
+                                            <div>
+                                                 <div className="text-[10px] text-gray-500 mb-2 font-bold tracking-widest mt-4">RECENT TRANSFERS RECEIVED</div>
+                                                 {recentTransfers.length === 0 && <div className="text-[10px] opacity-30 italic">No recent direct payments.</div>}
+                                                 {recentTransfers.map((tx, i) => (
+                                                     <div onClick={() => window.open(`https://xrpscan.com/tx/${tx.hash}`, '_blank')} key={i} className="border border-gray-800 bg-gray-900/40 p-2 rounded mb-1 flex justify-between items-center cursor-pointer hover:bg-gray-800 group relative">
+                                                         <div>
+                                                             <div className="text-[#39ff14] font-bold text-sm">{typeof tx.amount === 'string' ? xrpl.dropsToXrp(tx.amount) : tx.amount.value} {typeof tx.amount === 'string' ? 'XRP' : tx.amount.currency}</div>
+                                                             {tx.memo && <div className="text-[9px] text-[#d8b4fe] italic">"{tx.memo}"</div>}
+                                                             <div className="text-[8px] text-gray-500 font-mono">{new Date(tx.date).toLocaleDateString()} from {tx.sender.substring(0,4)}...</div>
+                                                         </div>
+                                                         <div className="text-[8px] text-gray-500 flex items-center gap-1 group-hover:text-white transition">
+                                                             DIRECT <span>↗</span>
+                                                         </div>
+                                                     </div>
+                                                 ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                {activeTab === 'WALLET' && (
+                                    <div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4">
+                                        <div className="p-3 border border-[#39ff14] bg-black/60 rounded flex flex-col items-center">
+                                            <div className="text-[10px] opacity-50 mb-1 w-full text-left">RECEIVE FUNDS</div>
+                                            <QRCodeCanvas value={wallet.address} size={100} />
+                                            <div className="text-xs font-mono break-all text-[#39ff14] mb-2 mt-2 text-center">{wallet.address}</div>
+                                            <button onClick={() => copyToClipboard(wallet.address)} className="w-full border border-[#1a5c0a] text-xs py-1 mb-2">COPY ADDRESS</button>
+                                        </div>
+                                        
+                                        {!isWalletActive && (
+                                            <div className="p-3 border border-red-500 bg-red-900/20 rounded animate-pulse">
+                                                <div className="text-red-500 font-bold text-xs mb-1">⚠️ ACTIVATION REQUIRED</div>
+                                                <div className="text-[10px] text-white opacity-80">
+                                                    This wallet is inactive. You must send at least <strong>1 XRP</strong> to this address to activate it on the ledger before you can add assets.
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="flex gap-2"><button onClick={() => setGenType('select')} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">+ NEW WALLET</button><button onClick={() => setShowAccountSwitcher(true)} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">SWITCH</button></div>
+                                    </div>
+                                )}
+                                
+                                {activeTab === 'LOGS' && (
+                                    <div className="flex-1 flex flex-col overflow-hidden bg-black">
+                                        <div className="h-1/3 border-b border-[#1a5c0a] overflow-y-auto p-2 font-mono text-[10px] space-y-1 custom-scroll">
+                                            <div className="text-[8px] opacity-50 sticky top-0 bg-black w-full pb-1 border-b border-gray-800 mb-1">SYSTEM LOGS</div>
+                                            {logs.map((l, i) => (<div key={i} className="p-1 border-l-2 pl-2 border-gray-500 text-gray-400"><span className="opacity-50 mr-2">[{l.time}]</span>{l.msg}</div>))}
+                                            <div ref={logEndRef} />
+                                        </div>
+                                        <div className="flex-1 flex flex-col overflow-hidden">
+                                            <div className="p-2 bg-[#050505] border-b border-[#1a5c0a] flex items-center gap-2">
+                                                <span className="text-[10px] font-bold text-[#39ff14]">LEDGER HISTORY</span>
+                                                <input className="flex-1 p-1 text-[10px] bg-black border border-gray-700" placeholder="Filter by Hash, Type..." value={historyFilter} onChange={e=>setHistoryFilter(e.target.value)} />
+                                                <button onClick={()=>fetchTxHistory(false)} disabled={historyLoading} className="px-2 py-1 bg-[#1a5c0a] text-white text-[10px] font-bold">FETCH</button>
+                                            </div>
+                                            <div className="flex-1 overflow-y-auto custom-scroll relative">
+                                                <table className="w-full text-left border-collapse">
+                                                    <thead className="sticky top-0 bg-black z-10 text-[8px] text-gray-500">
+                                                        <tr>
+                                                            <th className="p-2 border-b border-gray-800">TYPE</th>
+                                                            <th className="p-2 border-b border-gray-800">DESC</th>
+                                                            <th className="p-2 border-b border-gray-800">DATE</th>
+                                                            <th className="p-2 border-b border-gray-800 text-right">HASH</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="font-mono text-[10px]">
+                                                        {txHistory.filter(t => !historyFilter || JSON.stringify(t).toLowerCase().includes(historyFilter.toLowerCase())).map((tx, i) => (
+                                                            <tr key={i} className="border-b border-gray-900 hover:bg-[#1a5c0a]/20">
+                                                                <td className={`p-2 font-bold ${tx.success ? 'text-[#39ff14]' : 'text-red-500'}`}>{tx.type}</td>
+                                                                <td className="p-2 text-white">{tx.desc}</td>
+                                                                <td className="p-2 text-gray-400">{new Date(tx.date).toLocaleDateString()}</td>
+                                                                <td className="p-2 text-right"><a href={`https://xrpscan.com/tx/${tx.hash}`} target="_blank" className="text-[#39ff14] hover:underline">VIEW &rarr;</a></td>
+                                                            </tr>
+                                                        ))}
+                                                        {historyLoading && <tr><td colSpan="4" className="p-4 text-center text-[#39ff14] animate-pulse">LOADING DATA...</td></tr>}
+                                                    </tbody>
+                                                </table>
+                                                {txHistory.length > 0 && !historyLoading && (
+                                                    <div className="p-2 text-center">
+                                                        <button onClick={()=>fetchTxHistory(true)} className="text-[10px] border border-[#39ff14] px-4 py-2 text-[#39ff14] hover:bg-[#39ff14] hover:text-black transition">LOAD OLDER RECORDS</button>
+                                                    </div>
+                                                )}
+                                                {txHistory.length === 0 && !historyLoading && <div className="p-8 text-center text-gray-600 text-xs">NO HISTORY LOADED</div>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+
+                    {wallet && (
+                        <nav className="shrink-0 flex border-t border-[#39ff14] bg-black/90 pb-safe">
+                            <button id="nav-write" className={`tab-btn ${activeTab==='WRITE'?'active':''}`} onClick={()=>{sound.click();setActiveTab('WRITE')}}>WRITE</button>
+                            <button id="nav-manage" className={`tab-btn ${activeTab==='MANAGE'?'active':''}`} onClick={()=>{sound.click();setActiveTab('MANAGE');fetchChecks()}}>MANAGE</button>
+                            <button id="nav-inbox" className={`tab-btn ${activeTab==='INBOX'?'active':''}`} onClick={()=>{sound.click();setActiveTab('INBOX');fetchIncomingData()}}>INBOX</button>
+                            <button id="nav-wallet" className={`tab-btn ${activeTab==='WALLET'?'active':''}`} onClick={()=>{sound.click();setActiveTab('WALLET');fetchTrustlines()}}>WALLET</button>
+                            <button id="nav-logs" className={`tab-btn ${activeTab==='LOGS'?'active':''}`} onClick={()=>{sound.click();setActiveTab('LOGS');fetchTxHistory()}}>LOGS</button>
+                            <button className="tab-btn text-red-500 hover:bg-red-900/20" onClick={()=>{ if(confirm("Disconnect Session?")) { setWallet(null); setSeed(""); setBalance("---"); setAllWallets([]); sound.click(); }}}>EXIT</button>
+                        </nav>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
