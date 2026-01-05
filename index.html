@@ -352,12 +352,18 @@
         // --- COMPONENTS: VIRTUAL KEYBOARD ---
         const VirtualKeyboard = ({ onChar, onBackspace, onClear, onClose, visible }) => {
             const [caps, setCaps] = useState(false);
+            const [mode, setMode] = useState('ABC'); // ABC | SYM
             
             if (!visible) return null;
 
             const handleTouch = (char) => {
                 if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(20);
-                onChar(caps ? char.toUpperCase() : char);
+                if (char === 'ENTER') { onChar('\n'); return; }
+                if (mode === 'ABC') {
+                    onChar(caps ? char.toUpperCase() : char);
+                } else {
+                    onChar(char);
+                }
             };
 
             const handlePaste = async () => {
@@ -369,10 +375,17 @@
                 }
             };
 
-            const row1 = ['1','2','3','4','5','6','7','8','9','0'];
-            const row2 = ['q','w','e','r','t','y','u','i','o','p'];
-            const row3 = ['a','s','d','f','g','h','j','k','l'];
-            const row4 = ['z','x','c','v','b','n','m'];
+            const row1_abc = ['1','2','3','4','5','6','7','8','9','0'];
+            const row2_abc = ['q','w','e','r','t','y','u','i','o','p'];
+            const row3_abc = ['a','s','d','f','g','h','j','k','l'];
+            const row4_abc = ['z','x','c','v','b','n','m'];
+
+            const row1_sym = ['!','@','#','$','%','^','&','*','(',')'];
+            const row2_sym = ['-','_','=','+','\\','/','[',']','{','}'];
+            const row3_sym = [':',';','"',"'",',','.','?','<','>','|'];
+            const row4_sym = ['~','`','€','£','¥','©','®'];
+
+            const currentRows = mode === 'ABC' ? [row1_abc, row2_abc, row3_abc, row4_abc] : [row1_sym, row2_sym, row3_sym, row4_sym];
 
             // Helper to render keys with cascading delay
             // We use a global index 'kIdx' to stagger the wave effect across the whole board
@@ -386,6 +399,7 @@
                 if (isSpace) classes += " space";
                 if (isSpecial) classes += " special";
                 if (isWide && k === 'CAPS' && caps) classes += " bg-[#39ff14] text-black";
+                if (isWide && k === 'SYM' && mode === 'SYM') classes += " bg-[#39ff14] text-black";
 
                 return (
                     <button 
@@ -411,21 +425,26 @@
                     </div>
                     
                     <div className="vk-row">
-                        {row1.map(k => renderKey(k))}
+                        {currentRows[0].map(k => renderKey(k))}
                     </div>
                     <div className="vk-row">
-                        {row2.map(k => renderKey(k))}
+                        {currentRows[1].map(k => renderKey(k))}
                     </div>
                     <div className="vk-row px-4">
-                        {row3.map(k => renderKey(k))}
+                        {currentRows[2].map(k => renderKey(k))}
                     </div>
                     <div className="vk-row">
-                        {renderKey('CAPS', true, false, true, () => setCaps(!caps))}
-                        {row4.map(k => renderKey(k))}
+                        {renderKey(mode === 'ABC' ? 'CAPS' : 'ABC', true, false, true, () => {
+                            if (mode === 'ABC') setCaps(!caps);
+                            else setMode('ABC');
+                        })}
+                        {currentRows[3].map(k => renderKey(k))}
                         {renderKey('⌫', true, false, true, onBackspace)}
                     </div>
                     <div className="vk-row">
+                        {renderKey(mode === 'ABC' ? 'SYM' : '123', true, false, true, () => setMode(mode === 'ABC' ? 'SYM' : 'ABC'))}
                         {renderKey('SPACE', false, true, false, () => handleTouch(' '))}
+                        {renderKey('RETURN', true, false, true, () => handleTouch('ENTER'))}
                         {renderKey('DONE', true, false, true, onClose)}
                     </div>
                 </div>
@@ -680,6 +699,7 @@
 
             // KEYBOARD STATE
             const [showKeyboard, setShowKeyboard] = useState(false);
+            const [activeInput, setActiveInput] = useState('seed'); // 'seed' | 'dest' | 'amount' | 'memo' | 'batch' | 'issuer'
 
             const fileInputRef = useRef(null);
             const logEndRef = useRef(null);
@@ -699,10 +719,41 @@
 
             // KEYBOARD HANDLERS
             const handleKeyChar = (char) => {
-                if (typeof char === 'string') setSeed(prev => prev + char);
+                if (activeInput === 'seed') setSeed(prev => prev + char);
+                if (activeInput === 'dest') setDestAddress(prev => prev + char);
+                if (activeInput === 'amount') setAmount(prev => prev + char);
+                if (activeInput === 'memo') setMemo(prev => prev + char);
+                if (activeInput === 'batch') setBatchList(prev => prev + char);
+                if (activeInput === 'issuer') setIouIssuer(prev => prev + char);
             };
             const handleKeyBackspace = () => {
-                setSeed(prev => prev.slice(0, -1));
+                if (activeInput === 'seed') setSeed(prev => prev.slice(0, -1));
+                if (activeInput === 'dest') setDestAddress(prev => prev.slice(0, -1));
+                if (activeInput === 'amount') setAmount(prev => prev.slice(0, -1));
+                if (activeInput === 'memo') setMemo(prev => prev.slice(0, -1));
+                if (activeInput === 'batch') setBatchList(prev => prev.slice(0, -1));
+                if (activeInput === 'issuer') setIouIssuer(prev => prev.slice(0, -1));
+            };
+            const handleKeyClear = () => {
+                sound.alert();
+                if (activeInput === 'seed') setSeed("");
+                if (activeInput === 'dest') setDestAddress("");
+                if (activeInput === 'amount') setAmount("");
+                if (activeInput === 'memo') setMemo("");
+                if (activeInput === 'batch') setBatchList("");
+                if (activeInput === 'issuer') setIouIssuer("");
+            };
+
+            const openKeyboard = (field, e) => {
+                sound.click();
+                setActiveInput(field);
+                setShowKeyboard(true);
+                // ELEVATOR FUNCTION: Auto-scroll the clicked element into center view
+                if (e && e.target) {
+                    setTimeout(() => {
+                        e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 300); // Small delay to allow layout shift
+                }
             };
 
             // --- INTRO & TOUR FLOW LOGIC ---
@@ -1359,7 +1410,7 @@
                 try { 
                     const res = await client.request({ 
                         command: "account_lines", 
-                        account: wallet.address,
+                        account: wallet.address, 
                         ledger_index: "validated" 
                     }); 
                     setTrustlines(res.result.lines); 
@@ -1579,7 +1630,7 @@
             const LoginPanel = () => (
                 <div 
                     id="login-panel"
-                    className={`hud-panel w-11/12 max-w-sm rounded-lg relative flex flex-col max-h-[75vh] overflow-hidden transition-all duration-300 ${showKeyboard ? '-translate-y-32' : ''}`}
+                    className={`hud-panel w-11/12 max-w-sm rounded-lg relative flex flex-col max-h-[75vh] overflow-hidden transition-all duration-300 ${showKeyboard ? '-translate-y-48' : ''}`}
                 >
                     {/* Header */}
                     <div className="shrink-0 p-4 pb-2 text-center border-b border-[#1a5c0a]">
@@ -1628,7 +1679,7 @@
                                     {/* MODIFIED INPUT FOR VIRTUAL KEYBOARD - Replaces textarea with a clickable DIV */}
                                     <div 
                                         id="secret-display"
-                                        onClick={() => { sound.click(); setShowKeyboard(true); }}
+                                        onClick={(e) => openKeyboard('seed', e)}
                                         className={`w-full p-3 font-mono text-sm bg-black border ${showKeyboard ? 'border-[#39ff14] box-shadow-glow' : 'border-[#1a5c0a]'} h-24 overflow-y-auto cursor-text rounded break-words whitespace-pre-wrap`}
                                     >
                                         {seed ? seed : <span className="opacity-30 italic">TAP TO ENTER SECRET (s...) OR MNEMONIC...</span>}
@@ -1728,7 +1779,7 @@
                         visible={showKeyboard} 
                         onChar={handleKeyChar} 
                         onBackspace={handleKeyBackspace} 
-                        onClear={() => setSeed("")}
+                        onClear={handleKeyClear}
                         onClose={() => setShowKeyboard(false)} 
                     />
 
@@ -1930,59 +1981,59 @@
                         ) : (
                             <div className="flex-1 flex flex-col h-full overflow-hidden">
                                 {activeTab === 'WRITE' && (
-                                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scroll" id="write-tab">
-                                        <div className="flex bg-[#0a1f0a] border border-[#1a5c0a] p-1 rounded mb-2" id="mode-switch">
-                                            <button onClick={()=>{sound.click(); setPaymentMode('CHECK')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='CHECK' ? 'bg-[#39ff14] text-black shadow-[0_0_10px_#39ff14]' : 'text-gray-500 hover:text-white'}`}>CHECKBOOK</button>
-                                            <button onClick={()=>{sound.click(); setPaymentMode('PAYMENT')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='PAYMENT' ? 'bg-[#a855f7] text-white shadow-[0_0_10px_#a855f7]' : 'text-gray-500 hover:text-white'}`}>DIRECT SEND</button>
-                                        </div>
-
-                                        <div className="flex justify-end mb-2 gap-2">
-                                            <button id="batch-btn" onClick={()=>setIsBatchMode(!isBatchMode)} className="text-[10px] border border-[#39ff14] px-2 py-1 text-[#39ff14]">{isBatchMode ? "MODE: BATCH" : "MODE: SINGLE"}</button>
-                                        </div>
-                                        {isBatchMode ? ( <textarea placeholder="rAddress, Amount..." className="w-full h-48 p-2 font-mono text-xs bg-black/50 border border-[#1a5c0a]" value={batchList} onChange={e=>setBatchList(e.target.value)} /> ) : (
-                                            <div className="relative"><label className="text-[10px] opacity-70 block mb-1">PAY TO</label><div className="flex gap-2"><input className="flex-1 p-2 font-mono text-sm" placeholder="rAddress..." value={destAddress} onChange={e=>setDestAddress(e.target.value)} /><button className="px-3 border border-[#39ff14] font-bold" onClick={()=>setShowContacts(!showContacts)}>📒</button></div>{showContacts && renderContacts()}</div>
-                                        )}
-                                        <div className="flex gap-3">
-                                            <div className="flex-1"><label className="text-[10px] opacity-70 block mb-1">AMOUNT</label><input type="number" className="w-full p-2 font-mono text-sm" placeholder="0.00" value={amount} onChange={e=>setAmount(e.target.value)} /></div>
-                                            <div className="w-1/3"><label className="text-[10px] opacity-70 block mb-1">CURRENCY</label><select id="currency-select" className="w-full p-2 h-[38px] font-mono text-sm" value={currencyType} onChange={e=>{setCurrencyType(e.target.value); if(e.target.value==='IOU' && trustlines.length===0) fetchTrustlines();}}><option value="XRP">XRP</option><option value="IOU">Layer 2 (Asset)</option></select></div>
-                                        </div>
-                                        {currencyType === 'IOU' && (
-                                            <div className="p-2 border border-[#1a5c0a] bg-black/30 space-y-2 animate-fadeIn max-h-40 overflow-y-auto custom-scroll relative">
-                                                <div className="text-[8px] opacity-50 mb-1 flex justify-between items-center">
-                                                    <span>SELECT TOKEN ASSET</span>
-                                                    <button onClick={fetchTrustlines} className="text-[#39ff14] underline text-[8px] font-bold hover:text-white">LOAD ASSETS</button>
-                                                </div>
-                                                {trustlines.length === 0 && <div className="text-[10px] text-center text-gray-500 py-2">No assets found. Click 'LOAD ASSETS' to refresh.</div>}
-                                                {trustlines.map((t, idx) => (
-                                                    <div key={idx} onClick={() => handleAssetSelect(t)} className={`flex items-center gap-2 p-2 cursor-pointer border-b border-gray-800 hover:bg-[#1a5c0a]/30 ${iouCurrency === t.currency && iouIssuer === t.account ? 'bg-[#1a5c0a]/50 border-l-2 border-l-[#39ff14]' : ''}`}>
-                                                        <TokenIcon issuer={t.account} size={24} />
-                                                        <div className="flex-1">
-                                                            <div className="text-xs font-bold text-[#39ff14]">{decodeCurrency(t.currency)}</div>
-                                                            <div className="text-[8px] opacity-70 font-mono truncate w-24">{t.account}</div>
-                                                        </div>
-                                                        <div className="text-xs font-mono">{t.balance}</div>
-                                                    </div>
-                                                ))}
-                                                <div className="mt-2 pt-2 border-t border-gray-700">
-                                                    <div className="text-[8px] opacity-50 mb-1">MANUAL OVERRIDE</div><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="CURRENCY CODE" value={decodeCurrency(iouCurrency)} readOnly /><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="ISSUER (r...)" value={iouIssuer} onChange={e=>setIouIssuer(e.target.value)} />
-                                                </div>
+                                    <div className={`flex-1 overflow-y-auto p-4 space-y-4 custom-scroll ${showKeyboard ? 'pb-[320px]' : ''}`} id="write-tab">
+                                            <div className="flex bg-[#0a1f0a] border border-[#1a5c0a] p-1 rounded mb-2" id="mode-switch">
+                                                <button onClick={()=>{sound.click(); setPaymentMode('CHECK')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='CHECK' ? 'bg-[#39ff14] text-black shadow-[0_0_10px_#39ff14]' : 'text-gray-500 hover:text-white'}`}>CHECKBOOK</button>
+                                                <button onClick={()=>{sound.click(); setPaymentMode('PAYMENT')}} className={`flex-1 text-[10px] font-bold py-2 ${paymentMode==='PAYMENT' ? 'bg-[#a855f7] text-white shadow-[0_0_10px_#a855f7]' : 'text-gray-500 hover:text-white'}`}>DIRECT SEND</button>
                                             </div>
-                                        )}
-                                        <div>
-                                            <label className="text-[10px] opacity-70 block mb-1">MEMO</label>
-                                            <input className="w-full p-2 font-mono text-sm" placeholder="e.g. 'Lunch for team'" value={memo} onChange={e=>setMemo(e.target.value)} />
-                                        </div>
-                                        <button id="action-btn" onClick={isBatchMode ? initiateBatchRun : initiateTransaction} disabled={loading} className={`w-full btn-action p-4 text-lg mt-4 ${paymentMode==='PAYMENT' ? 'border-[#a855f7] text-[#d8b4fe] hover:bg-[#a855f7] hover:text-white' : 'shadow-[0_0_15px_rgba(57,255,20,0.2)]'}`}>
-                                            {loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? `EXECUTE BATCH ${paymentMode}S` : (paymentMode==='CHECK' ? "ISSUE CHECK" : "SEND PAYMENT"))}
-                                            <span className="block text-[8px] opacity-60 font-normal mt-1">{paymentMode==='CHECK' ? 'RECEIVER MUST CASH' : 'IMMEDIATE TRANSFER'}</span>
-                                        </button>
+
+                                            <div className="flex justify-end mb-2 gap-2">
+                                                <button id="batch-btn" onClick={()=>setIsBatchMode(!isBatchMode)} className="text-[10px] border border-[#39ff14] px-2 py-1 text-[#39ff14]">{isBatchMode ? "MODE: BATCH" : "MODE: SINGLE"}</button>
+                                            </div>
+                                            {isBatchMode ? ( <textarea placeholder="rAddress, Amount..." className="w-full h-48 p-2 font-mono text-xs bg-black/50 border border-[#1a5c0a]" value={batchList} onClick={(e)=>openKeyboard('batch', e)} readOnly /> ) : (
+                                                <div className="relative"><label className="text-[10px] opacity-70 block mb-1">PAY TO</label><div className="flex gap-2"><input className="flex-1 p-2 font-mono text-sm" placeholder="rAddress..." value={destAddress} onClick={(e)=>openKeyboard('dest', e)} readOnly /><button className="px-3 border border-[#39ff14] font-bold" onClick={()=>setShowContacts(!showContacts)}>📒</button></div>{showContacts && renderContacts()}</div>
+                                            )}
+                                            <div className="flex gap-3">
+                                                <div className="flex-1"><label className="text-[10px] opacity-70 block mb-1">AMOUNT</label><input type="text" className="w-full p-2 font-mono text-sm" placeholder="0.00" value={amount} onClick={(e)=>openKeyboard('amount', e)} readOnly /></div>
+                                                <div className="w-1/3"><label className="text-[10px] opacity-70 block mb-1">CURRENCY</label><select id="currency-select" className="w-full p-2 h-[38px] font-mono text-sm" value={currencyType} onChange={e=>{setCurrencyType(e.target.value); if(e.target.value==='IOU' && trustlines.length===0) fetchTrustlines();}}><option value="XRP">XRP</option><option value="IOU">Layer 2 (Asset)</option></select></div>
+                                            </div>
+                                            {currencyType === 'IOU' && (
+                                                <div className="p-2 border border-[#1a5c0a] bg-black/30 space-y-2 animate-fadeIn max-h-40 overflow-y-auto custom-scroll relative">
+                                                    <div className="text-[8px] opacity-50 mb-1 flex justify-between items-center">
+                                                        <span>SELECT TOKEN ASSET</span>
+                                                        <button onClick={fetchTrustlines} className="text-[#39ff14] underline text-[8px] font-bold hover:text-white">LOAD ASSETS</button>
+                                                    </div>
+                                                    {trustlines.length === 0 && <div className="text-[10px] text-center text-gray-500 py-2">No assets found. Click 'LOAD ASSETS' to refresh.</div>}
+                                                    {trustlines.map((t, idx) => (
+                                                        <div key={idx} onClick={() => handleAssetSelect(t)} className={`flex items-center gap-2 p-2 cursor-pointer border-b border-gray-800 hover:bg-[#1a5c0a]/30 ${iouCurrency === t.currency && iouIssuer === t.account ? 'bg-[#1a5c0a]/50 border-l-2 border-l-[#39ff14]' : ''}`}>
+                                                            <TokenIcon issuer={t.account} size={24} />
+                                                            <div className="flex-1">
+                                                                <div className="text-xs font-bold text-[#39ff14]">{decodeCurrency(t.currency)}</div>
+                                                                <div className="text-[8px] opacity-70 font-mono truncate w-24">{t.account}</div>
+                                                            </div>
+                                                            <div className="text-xs font-mono">{t.balance}</div>
+                                                        </div>
+                                                    ))}
+                                                    <div className="mt-2 pt-2 border-t border-gray-700">
+                                                        <div className="text-[8px] opacity-50 mb-1">MANUAL OVERRIDE</div><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="CURRENCY CODE" value={decodeCurrency(iouCurrency)} readOnly /><input className="w-full bg-transparent border-b border-[#39ff14] text-xs p-1" placeholder="ISSUER (r...)" value={iouIssuer} onClick={(e)=>openKeyboard('issuer', e)} readOnly />
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <div>
+                                                <label className="text-[10px] opacity-70 block mb-1">MEMO</label>
+                                                <input className="w-full p-2 font-mono text-sm" placeholder="e.g. 'Lunch for team'" value={memo} onClick={(e)=>openKeyboard('memo', e)} readOnly />
+                                            </div>
+                                            <button id="action-btn" onClick={isBatchMode ? initiateBatchRun : initiateTransaction} disabled={loading} className={`w-full btn-action p-4 text-lg mt-4 ${paymentMode==='PAYMENT' ? 'border-[#a855f7] text-[#d8b4fe] hover:bg-[#a855f7] hover:text-white' : 'shadow-[0_0_15px_rgba(57,255,20,0.2)]'}`}>
+                                                {loading ? (isBatchMode ? "PROCESSING BATCH..." : "SIGNING...") : (isBatchMode ? `EXECUTE BATCH ${paymentMode}S` : (paymentMode==='CHECK' ? "ISSUE CHECK" : "SEND PAYMENT"))}
+                                                <span className="block text-[8px] opacity-60 font-normal mt-1">{paymentMode==='CHECK' ? 'RECEIVER MUST CASH' : 'IMMEDIATE TRANSFER'}</span>
+                                            </button>
                                     </div>
                                 )}
                                 
-                                {activeTab === 'MANAGE' && (<div className="flex-1 flex flex-col overflow-hidden"><div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">OUTGOING CHECKS</span><button onClick={fetchChecks} className="text-[10px] border border-[#39ff14] px-2 py-1">REFRESH</button></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scroll">{activeChecks.map(c => (<div key={c.index} className="border border-[#1a5c0a] bg-black/40 p-3 rounded relative"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-[#39ff14]">{typeof c.SendMax === 'string' ? xrpl.dropsToXrp(c.SendMax) : c.SendMax.value}</span><button onClick={() => requestAction(c.index, 'VOID')} className="border border-red-500 text-red-500 text-[10px] px-2 py-1">VOID</button></div></div>))}</div></div>)}
+                                {activeTab === 'MANAGE' && (<div className={`flex-1 flex flex-col overflow-hidden ${showKeyboard ? 'pb-[320px]' : ''}`}><div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">OUTGOING CHECKS</span><button onClick={fetchChecks} className="text-[10px] border border-[#39ff14] px-2 py-1">REFRESH</button></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scroll">{activeChecks.map(c => (<div key={c.index} className="border border-[#1a5c0a] bg-black/40 p-3 rounded relative"><div className="flex justify-between items-center mb-1"><span className="text-lg font-bold text-[#39ff14]">{typeof c.SendMax === 'string' ? xrpl.dropsToXrp(c.SendMax) : c.SendMax.value}</span><button onClick={() => requestAction(c.index, 'VOID')} className="border border-red-500 text-red-500 text-[10px] px-2 py-1">VOID</button></div></div>))}</div></div>)}
                                 
                                 {activeTab === 'INBOX' && (
-                                    <div className="flex-1 flex flex-col overflow-hidden">
+                                    <div className={`flex-1 flex flex-col overflow-hidden ${showKeyboard ? 'pb-[320px]' : ''}`}>
                                         <div className="p-2 border-b border-[#1a5c0a] flex justify-between items-center bg-black/50"><span className="text-xs">PENDING FUNDS</span><button id="scan-btn" onClick={fetchIncomingData} className="text-[10px] border border-[#39ff14] px-2 py-1">SCAN</button></div>
                                         <div className="flex-1 overflow-y-auto p-2 space-y-4 custom-scroll">
                                             
@@ -2016,69 +2067,69 @@
                                 
                                 {activeTab === 'WALLET' && (
                                     <div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4">
-                                        <div className="p-3 border border-[#39ff14] bg-black/60 rounded flex flex-col items-center">
-                                            <div className="text-[10px] opacity-50 mb-1 w-full text-left">RECEIVE FUNDS</div>
-                                            <QRCodeCanvas value={wallet.address} size={100} />
-                                            <div className="text-xs font-mono break-all text-[#39ff14] mb-2 mt-2 text-center">{wallet.address}</div>
-                                            <button onClick={() => copyToClipboard(wallet.address)} className="w-full border border-[#1a5c0a] text-xs py-1 mb-2">COPY ADDRESS</button>
-                                        </div>
-                                        
-                                        {!isWalletActive && (
-                                            <div className="p-3 border border-red-500 bg-red-900/20 rounded animate-pulse">
-                                                <div className="text-red-500 font-bold text-xs mb-1">⚠️ ACTIVATION REQUIRED</div>
-                                                <div className="text-[10px] text-white opacity-80">
-                                                    This wallet is inactive. You must send at least <strong>1 XRP</strong> to this address to activate it on the ledger before you can add assets.
-                                                </div>
+                                            <div className="p-3 border border-[#39ff14] bg-black/60 rounded flex flex-col items-center">
+                                                <div className="text-[10px] opacity-50 mb-1 w-full text-left">RECEIVE FUNDS</div>
+                                                <QRCodeCanvas value={wallet.address} size={100} />
+                                                <div className="text-xs font-mono break-all text-[#39ff14] mb-2 mt-2 text-center">{wallet.address}</div>
+                                                <button onClick={() => copyToClipboard(wallet.address)} className="w-full border border-[#1a5c0a] text-xs py-1 mb-2">COPY ADDRESS</button>
                                             </div>
-                                        )}
+                                            
+                                            {!isWalletActive && (
+                                                <div className="p-3 border border-red-500 bg-red-900/20 rounded animate-pulse">
+                                                    <div className="text-red-500 font-bold text-xs mb-1">⚠️ ACTIVATION REQUIRED</div>
+                                                    <div className="text-[10px] text-white opacity-80">
+                                                        This wallet is inactive. You must send at least <strong>1 XRP</strong> to this address to activate it on the ledger before you can add assets.
+                                                    </div>
+                                                </div>
+                                            )}
 
-                                        <div className="flex gap-2"><button onClick={() => setGenType('select')} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">+ NEW WALLET</button><button onClick={() => setShowAccountSwitcher(true)} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">SWITCH</button></div>
+                                            <div className="flex gap-2"><button onClick={() => setGenType('select')} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">+ NEW WALLET</button><button onClick={() => setShowAccountSwitcher(true)} className="flex-1 border border-[#39ff14] text-[#39ff14] text-[10px] py-2">SWITCH</button></div>
                                     </div>
                                 )}
                                 
                                 {activeTab === 'LOGS' && (
                                     <div className="flex-1 flex flex-col overflow-hidden bg-black">
-                                        <div className="h-1/3 border-b border-[#1a5c0a] overflow-y-auto p-2 font-mono text-[10px] space-y-1 custom-scroll">
-                                            <div className="text-[8px] opacity-50 sticky top-0 bg-black w-full pb-1 border-b border-gray-800 mb-1">SYSTEM LOGS</div>
-                                            {logs.map((l, i) => (<div key={i} className="p-1 border-l-2 pl-2 border-gray-500 text-gray-400"><span className="opacity-50 mr-2">[{l.time}]</span>{l.msg}</div>))}
-                                            <div ref={logEndRef} />
-                                        </div>
-                                        <div className="flex-1 flex flex-col overflow-hidden">
-                                            <div className="p-2 bg-[#050505] border-b border-[#1a5c0a] flex items-center gap-2">
-                                                <span className="text-[10px] font-bold text-[#39ff14]">LEDGER HISTORY</span>
-                                                <input className="flex-1 p-1 text-[10px] bg-black border border-gray-700" placeholder="Filter by Hash, Type..." value={historyFilter} onChange={e=>setHistoryFilter(e.target.value)} />
-                                                <button onClick={()=>fetchTxHistory(false)} disabled={historyLoading} className="px-2 py-1 bg-[#1a5c0a] text-white text-[10px] font-bold">FETCH</button>
+                                            <div className="h-1/3 border-b border-[#1a5c0a] overflow-y-auto p-2 font-mono text-[10px] space-y-1 custom-scroll">
+                                                <div className="text-[8px] opacity-50 sticky top-0 bg-black w-full pb-1 border-b border-gray-800 mb-1">SYSTEM LOGS</div>
+                                                {logs.map((l, i) => (<div key={i} className="p-1 border-l-2 pl-2 border-gray-500 text-gray-400"><span className="opacity-50 mr-2">[{l.time}]</span>{l.msg}</div>))}
+                                                <div ref={logEndRef} />
                                             </div>
-                                            <div className="flex-1 overflow-y-auto custom-scroll relative">
-                                                <table className="w-full text-left border-collapse">
-                                                    <thead className="sticky top-0 bg-black z-10 text-[8px] text-gray-500">
-                                                        <tr>
-                                                            <th className="p-2 border-b border-gray-800">TYPE</th>
-                                                            <th className="p-2 border-b border-gray-800">DESC</th>
-                                                            <th className="p-2 border-b border-gray-800">DATE</th>
-                                                            <th className="p-2 border-b border-gray-800 text-right">HASH</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="font-mono text-[10px]">
-                                                        {txHistory.filter(t => !historyFilter || JSON.stringify(t).toLowerCase().includes(historyFilter.toLowerCase())).map((tx, i) => (
-                                                            <tr key={i} className="border-b border-gray-900 hover:bg-[#1a5c0a]/20">
-                                                                <td className={`p-2 font-bold ${tx.success ? 'text-[#39ff14]' : 'text-red-500'}`}>{tx.type}</td>
-                                                                <td className="p-2 text-white">{tx.desc}</td>
-                                                                <td className="p-2 text-gray-400">{new Date(tx.date).toLocaleDateString()}</td>
-                                                                <td className="p-2 text-right"><a href={`https://xrpscan.com/tx/${tx.hash}`} target="_blank" className="text-[#39ff14] hover:underline">VIEW &rarr;</a></td>
+                                            <div className="flex-1 flex flex-col overflow-hidden">
+                                                <div className="p-2 bg-[#050505] border-b border-[#1a5c0a] flex items-center gap-2">
+                                                    <span className="text-[10px] font-bold text-[#39ff14]">LEDGER HISTORY</span>
+                                                    <input className="flex-1 p-1 text-[10px] bg-black border border-gray-700" placeholder="Filter by Hash, Type..." value={historyFilter} onChange={e=>setHistoryFilter(e.target.value)} />
+                                                    <button onClick={()=>fetchTxHistory(false)} disabled={historyLoading} className="px-2 py-1 bg-[#1a5c0a] text-white text-[10px] font-bold">FETCH</button>
+                                                </div>
+                                                <div className="flex-1 overflow-y-auto custom-scroll relative">
+                                                    <table className="w-full text-left border-collapse">
+                                                        <thead className="sticky top-0 bg-black z-10 text-[8px] text-gray-500">
+                                                            <tr>
+                                                                <th className="p-2 border-b border-gray-800">TYPE</th>
+                                                                <th className="p-2 border-b border-gray-800">DESC</th>
+                                                                <th className="p-2 border-b border-gray-800">DATE</th>
+                                                                <th className="p-2 border-b border-gray-800 text-right">HASH</th>
                                                             </tr>
-                                                        ))}
-                                                        {historyLoading && <tr><td colSpan="4" className="p-4 text-center text-[#39ff14] animate-pulse">LOADING DATA...</td></tr>}
-                                                    </tbody>
-                                                </table>
-                                                {txHistory.length > 0 && !historyLoading && (
-                                                    <div className="p-2 text-center">
-                                                        <button onClick={()=>fetchTxHistory(true)} className="text-[10px] border border-[#39ff14] px-4 py-2 text-[#39ff14] hover:bg-[#39ff14] hover:text-black transition">LOAD OLDER RECORDS</button>
-                                                    </div>
-                                                )}
-                                                {txHistory.length === 0 && !historyLoading && <div className="p-8 text-center text-gray-600 text-xs">NO HISTORY LOADED</div>}
+                                                        </thead>
+                                                        <tbody className="font-mono text-[10px]">
+                                                            {txHistory.filter(t => !historyFilter || JSON.stringify(t).toLowerCase().includes(historyFilter.toLowerCase())).map((tx, i) => (
+                                                                <tr key={i} className="border-b border-gray-900 hover:bg-[#1a5c0a]/20">
+                                                                    <td className={`p-2 font-bold ${tx.success ? 'text-[#39ff14]' : 'text-red-500'}`}>{tx.type}</td>
+                                                                    <td className="p-2 text-white">{tx.desc}</td>
+                                                                    <td className="p-2 text-gray-400">{new Date(tx.date).toLocaleDateString()}</td>
+                                                                    <td className="p-2 text-right"><a href={`https://xrpscan.com/tx/${tx.hash}`} target="_blank" className="text-[#39ff14] hover:underline">VIEW &rarr;</a></td>
+                                                                </tr>
+                                                            ))}
+                                                            {historyLoading && <tr><td colSpan="4" className="p-4 text-center text-[#39ff14] animate-pulse">LOADING DATA...</td></tr>}
+                                                        </tbody>
+                                                    </table>
+                                                    {txHistory.length > 0 && !historyLoading && (
+                                                        <div className="p-2 text-center">
+                                                                <button onClick={()=>fetchTxHistory(true)} className="text-[10px] border border-[#39ff14] px-4 py-2 text-[#39ff14] hover:bg-[#39ff14] hover:text-black transition">LOAD OLDER RECORDS</button>
+                                                        </div>
+                                                    )}
+                                                    {txHistory.length === 0 && !historyLoading && <div className="p-8 text-center text-gray-600 text-xs">NO HISTORY LOADED</div>}
+                                                </div>
                                             </div>
-                                        </div>
                                     </div>
                                 )}
                             </div>
