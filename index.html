@@ -350,7 +350,8 @@
         ];
 
         // --- COMPONENTS: VIRTUAL KEYBOARD ---
-        const VirtualKeyboard = ({ onChar, onBackspace, onClear, onClose, visible }) => {
+        // UPDATED: Now accepts 'activeValue' and 'activeLabel' to display PREVIEW
+        const VirtualKeyboard = ({ onChar, onBackspace, onClear, onClose, visible, activeValue, activeLabel }) => {
             const [caps, setCaps] = useState(false);
             const [mode, setMode] = useState('ABC'); // ABC | SYM
             
@@ -371,7 +372,11 @@
                     const text = await navigator.clipboard.readText();
                     if(text) onChar(text);
                 } catch(e) {
-                    alert("Clipboard permission needed to paste.");
+                    // Fallback for secure contexts where clipboard read is blocked
+                    const manualPaste = prompt("Secure browser blocked auto-paste.\n\nPlease paste your text here:");
+                    if (manualPaste) {
+                        onChar(manualPaste);
+                    }
                 }
             };
 
@@ -388,7 +393,6 @@
             const currentRows = mode === 'ABC' ? [row1_abc, row2_abc, row3_abc, row4_abc] : [row1_sym, row2_sym, row3_sym, row4_sym];
 
             // Helper to render keys with cascading delay
-            // We use a global index 'kIdx' to stagger the wave effect across the whole board
             let kIdx = 0;
             const renderKey = (k, isWide=false, isSpace=false, isSpecial=false, onClickOverride=null) => {
                 const delay = (kIdx * 0.05) + 's';
@@ -415,8 +419,22 @@
 
             return (
                 <div className="vk-container animate-slideUp">
+                    {/* NEW PREVIEW BAR */}
+                    <div className="bg-[#0a1f0a] border-t border-l border-r border-[#39ff14] rounded-t mb-1 p-2 flex flex-col shadow-[0_0_10px_#39ff14] relative top-[-4px]">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-[10px] text-[#39ff14] font-bold uppercase tracking-widest">{activeLabel} (LIVE INPUT)</span>
+                            <span className="text-[8px] text-gray-500">TYPE BELOW OR PASTE</span>
+                        </div>
+                        <div className="bg-black border border-[#1a5c0a] p-2 min-h-[30px] flex items-center">
+                            <span className="font-mono text-white text-sm break-all leading-tight">
+                                {activeValue || <span className="opacity-30">...</span>}
+                                <span className="custom-cursor"></span>
+                            </span>
+                        </div>
+                    </div>
+
                     <div className="vk-toolbar">
-                        <span className="text-xs text-[#39ff14] font-mono animate-pulse">SECURE INPUT ACTIVE</span>
+                        <span className="text-xs text-[#39ff14] font-mono animate-pulse">SECURE KEYBOARD</span>
                         <div className="flex gap-4">
                             <button onClick={handlePaste} className="text-xs text-gray-400 hover:text-white"><i className="fas fa-paste"></i> PASTE</button>
                             <button onClick={onClear} className="text-xs text-orange-500 hover:text-orange-300 font-bold">CLEAR</button>
@@ -756,6 +774,31 @@
                 }
             };
 
+            // Helper to get current value for preview
+            const getActiveValue = () => {
+                switch(activeInput) {
+                    case 'seed': return seed;
+                    case 'dest': return destAddress;
+                    case 'amount': return amount;
+                    case 'memo': return memo;
+                    case 'batch': return batchList;
+                    case 'issuer': return iouIssuer;
+                    default: return '';
+                }
+            };
+            
+            const getActiveLabel = () => {
+                switch(activeInput) {
+                    case 'seed': return 'SECRET KEY / MNEMONIC';
+                    case 'dest': return 'DESTINATION ADDRESS';
+                    case 'amount': return 'AMOUNT';
+                    case 'memo': return 'MEMO DATA';
+                    case 'batch': return 'BATCH LIST';
+                    case 'issuer': return 'ISSUER ADDRESS';
+                    default: return 'INPUT';
+                }
+            };
+
             // --- INTRO & TOUR FLOW LOGIC ---
             
             // 0. Handle Splash Completion
@@ -1025,6 +1068,7 @@
             // --- UTILITY: HEX TRANSLATOR ---
             const decodeHex = (hex) => {
                 if (!hex) return "";
+                if (hex.length === 3) return hex;
                 try {
                     // XRPL hex strings are often simple hex-encoded utf8
                     return xrpl.convertHexToString(hex).replace(/\0/g, '');
@@ -1244,29 +1288,30 @@
             const loadWalletFromInput = (inputOverride) => {
                 sound.click();
                 setLoginError(null); // Clear previous errors
-                const input = inputOverride || seed.trim();
                 
-                if (!input) {
+                // --- SMART SANITIZER FIX FOR "13 WORDS" ISSUE ---
+                // Users often paste from notes apps that add bullets (1. word) or punctuation (word1, word2)
+                let rawInput = inputOverride || seed;
+                if (!rawInput) {
                       setLoginError("Please enter a Secret Key");
                       return;
                 }
 
-                // Pre-flight check: Mnemonic length
-                if (input.includes(' ')) {
-                    const wordCount = input.split(/[\s\n]+/).filter(x => x).length;
-                    if (wordCount !== 12 && wordCount !== 24) {
-                        setLoginError(`Non-Standard Length (${wordCount} words). Standard is 12 or 24.`);
-                        return;
-                    }
-                }
-                
+                // 1. Convert newlines and punctuation to spaces
+                // 2. Remove list numbering like "1." "12."
+                // 3. Trim extra whitespace
+                let cleanedInput = rawInput
+                    .replace(/[\n\r]/g, ' ') 
+                    .replace(/[.,;]/g, ' ')
+                    .replace(/[0-9]+\./g, '') 
+                    .trim();
+
+                let w;
                 try {
-                    let w;
                     // Try parsing as JSON first
-                    if (input.trim().startsWith('{')) {
+                    if (cleanedInput.startsWith('{')) {
                         try {
-                             const d = JSON.parse(input);
-                             // Check multiple common key fields
+                             const d = JSON.parse(cleanedInput);
                              const key = d.seed || d.secret || d.privateKey || d.mnemonic || d.master_seed || d.master_key;
                              if (!key) throw new Error("JSON missing 'seed' or 'secret' field");
                              
@@ -1275,10 +1320,21 @@
                         } catch(jsonErr) {
                              throw new Error("Invalid JSON File");
                         }
-                    } else if (input.includes(' ')) {
-                        w = xrpl.Wallet.fromMnemonic(input.split(/[\s\n]+/).filter(x => x).join(' '));
+                    } else if (cleanedInput.includes(' ')) {
+                        // MNEMONIC MODE (Words)
+                        const words = cleanedInput.split(/\s+/).filter(x => x); // Split by any whitespace and remove empty strings
+                        
+                        // STRICT COUNT CHECK
+                        if (words.length !== 12 && words.length !== 24) {
+                            setLoginError(`Invalid Word Count: Found ${words.length} words. (Standard is 12 or 24).`);
+                            return;
+                        }
+                        
+                        // Re-join with single spaces for BIP39 compatibility
+                        w = xrpl.Wallet.fromMnemonic(words.join(' '));
                     } else { 
-                        w = xrpl.Wallet.fromSeed(input); 
+                        // SEED MODE (s...)
+                        w = xrpl.Wallet.fromSeed(cleanedInput); 
                     }
                     
                     if(w) {
@@ -1288,9 +1344,8 @@
                     }
                 } catch (e) { 
                     let msg = e.message;
-                    // Enhanced mapping
-                    if (msg.includes("checksum")) msg = "Invalid Checksum: Check word order.";
-                    else if (msg.includes("word list")) msg = "Invalid Word found.";
+                    if (msg.includes("checksum")) msg = "Invalid Checksum: Words are in wrong order.";
+                    else if (msg.includes("word list")) msg = "Invalid Word found (Check spelling).";
                     
                     setLoginError(msg);
                     addLog("Invalid Key", "error"); 
@@ -1621,16 +1676,16 @@
                 // ripple:r...?amount=...
                 // Using simple text/uri format for general readers
                 if(requestAmount) {
-                      setRequestQR(`https://xrpl.org/send?to=${wallet.address}&amount=${requestAmount}&dt=0`);
+                       setRequestQR(`https://xrpl.org/send?to=${wallet.address}&amount=${requestAmount}&dt=0`);
                 } else {
-                      setRequestQR(wallet.address);
+                       setRequestQR(wallet.address);
                 }
             };
 
             const LoginPanel = () => (
                 <div 
                     id="login-panel"
-                    className={`hud-panel w-11/12 max-w-sm rounded-lg relative flex flex-col max-h-[75vh] overflow-hidden transition-all duration-300 ${showKeyboard ? '-translate-y-48' : ''}`}
+                    className={`hud-panel w-11/12 max-w-sm rounded-lg relative flex flex-col transition-all duration-300 ${showKeyboard ? 'absolute top-4 max-h-[45vh]' : 'max-h-[75vh]'} overflow-hidden`}
                 >
                     {/* Header */}
                     <div className="shrink-0 p-4 pb-2 text-center border-b border-[#1a5c0a]">
@@ -1676,15 +1731,17 @@
                                         </span>
                                     </label>
                                     
-                                    {/* MODIFIED INPUT FOR VIRTUAL KEYBOARD - Replaces textarea with a clickable DIV */}
-                                    <div 
+                                    {/* MODIFIED INPUT FOR VIRTUAL KEYBOARD - REVERTED TO TEXTAREA FOR PC SUPPORT */}
+                                    <textarea 
                                         id="secret-display"
+                                        value={seed}
+                                        onChange={(e) => setSeed(e.target.value)}
                                         onClick={(e) => openKeyboard('seed', e)}
-                                        className={`w-full p-3 font-mono text-sm bg-black border ${showKeyboard ? 'border-[#39ff14] box-shadow-glow' : 'border-[#1a5c0a]'} h-24 overflow-y-auto cursor-text rounded break-words whitespace-pre-wrap`}
-                                    >
-                                        {seed ? seed : <span className="opacity-30 italic">TAP TO ENTER SECRET (s...) OR MNEMONIC...</span>}
-                                        {showKeyboard && <span className="custom-cursor"></span>}
-                                    </div>
+                                        placeholder="TAP TO ENTER SECRET (s...) OR MNEMONIC..."
+                                        className={`w-full p-3 font-mono text-sm bg-black border ${showKeyboard ? 'border-[#39ff14] box-shadow-glow' : 'border-[#1a5c0a]'} h-24 overflow-y-auto cursor-text rounded break-words resize-none focus:border-[#39ff14] focus:outline-none`}
+                                        autoComplete="off"
+                                        spellCheck="false"
+                                    />
                                 </div>
                                 
                                 {/* ERROR DISPLAY AREA */}
@@ -1781,6 +1838,8 @@
                         onBackspace={handleKeyBackspace} 
                         onClear={handleKeyClear}
                         onClose={() => setShowKeyboard(false)} 
+                        activeValue={getActiveValue()}
+                        activeLabel={getActiveLabel()}
                     />
 
                     {/* TRANSACTION PREVIEW MODAL */}
