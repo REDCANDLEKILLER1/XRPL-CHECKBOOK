@@ -512,9 +512,11 @@
         );
 
         // --- COMPONENTS: TOKEN AVATAR ---
-        const TokenIcon = ({ issuer, size=24 }) => {
+        const TokenIcon = ({ issuer, currency, size=24 }) => {
             const [error, setError] = useState(false);
-            const url = `https://xumm.app/avatar/${issuer}_200`;
+            // Xumm Avatar requires .png to redirect correctly.
+            // This guarantees images match Xumm wallet listings.
+            const url = `https://xumm.app/avatar/${issuer}_200.png`;
             
             if (error || !issuer) {
                 return <div className={`bg-[#1a5c0a] rounded-full border border-[#39ff14] flex items-center justify-center font-bold text-[#39ff14] text-[8px]`} style={{width: size, height: size}}>?</div>;
@@ -525,7 +527,7 @@
                     onError={() => setError(true)} 
                     className="rounded-full border border-[#39ff14] bg-black object-cover" 
                     style={{width: size, height: size}} 
-                    alt="Token"
+                    alt={currency || "Token"}
                 />
             );
         };
@@ -2058,7 +2060,7 @@
                                                     {trustlines.length === 0 && <div className="text-[10px] text-center text-gray-500 py-2">No assets found. Click 'LOAD ASSETS' to refresh.</div>}
                                                     {trustlines.map((t, idx) => (
                                                         <div key={idx} onClick={() => handleAssetSelect(t)} className={`flex items-center gap-2 p-2 cursor-pointer border-b border-gray-800 hover:bg-[#1a5c0a]/30 ${iouCurrency === t.currency && iouIssuer === t.account ? 'bg-[#1a5c0a]/50 border-l-2 border-l-[#39ff14]' : ''}`}>
-                                                            <TokenIcon issuer={t.account} size={24} />
+                                                            <TokenIcon issuer={t.account} currency={decodeCurrency(t.currency)} size={24} />
                                                             <div className="flex-1">
                                                                 <div className="text-xs font-bold text-[#39ff14]">{decodeCurrency(t.currency)}</div>
                                                                 <div className="text-[8px] opacity-70 font-mono truncate w-24">{t.account}</div>
