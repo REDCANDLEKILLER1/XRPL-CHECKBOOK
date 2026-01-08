@@ -736,30 +736,30 @@
             useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
             // KEYBOARD HANDLERS
+            const getInputSetter = (field) => {
+                switch(field) {
+                    case 'seed': return setSeed;
+                    case 'dest': return setDestAddress;
+                    case 'amount': return setAmount;
+                    case 'memo': return setMemo;
+                    case 'batch': return setBatchList;
+                    case 'issuer': return setIouIssuer;
+                    default: return null;
+                }
+            };
+
             const handleKeyChar = (char) => {
-                if (activeInput === 'seed') setSeed(prev => prev + char);
-                if (activeInput === 'dest') setDestAddress(prev => prev + char);
-                if (activeInput === 'amount') setAmount(prev => prev + char);
-                if (activeInput === 'memo') setMemo(prev => prev + char);
-                if (activeInput === 'batch') setBatchList(prev => prev + char);
-                if (activeInput === 'issuer') setIouIssuer(prev => prev + char);
+                const setter = getInputSetter(activeInput);
+                if (setter) setter(prev => prev + char);
             };
             const handleKeyBackspace = () => {
-                if (activeInput === 'seed') setSeed(prev => prev.slice(0, -1));
-                if (activeInput === 'dest') setDestAddress(prev => prev.slice(0, -1));
-                if (activeInput === 'amount') setAmount(prev => prev.slice(0, -1));
-                if (activeInput === 'memo') setMemo(prev => prev.slice(0, -1));
-                if (activeInput === 'batch') setBatchList(prev => prev.slice(0, -1));
-                if (activeInput === 'issuer') setIouIssuer(prev => prev.slice(0, -1));
+                const setter = getInputSetter(activeInput);
+                if (setter) setter(prev => prev.slice(0, -1));
             };
             const handleKeyClear = () => {
                 sound.alert();
-                if (activeInput === 'seed') setSeed("");
-                if (activeInput === 'dest') setDestAddress("");
-                if (activeInput === 'amount') setAmount("");
-                if (activeInput === 'memo') setMemo("");
-                if (activeInput === 'batch') setBatchList("");
-                if (activeInput === 'issuer') setIouIssuer("");
+                const setter = getInputSetter(activeInput);
+                if (setter) setter("");
             };
 
             const openKeyboard = (field, e) => {
@@ -1616,20 +1616,22 @@
                 }
             };
 
+            const buildTransaction = (destination, amountStr) => {
+                let amountVal = currencyType === 'XRP' ? xrpl.xrpToDrops(amountStr) : { currency: iouCurrency, issuer: iouIssuer, value: amountStr };
+                let tx;
+                if (paymentMode === 'CHECK') {
+                     tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: destination, SendMax: amountVal };
+                } else {
+                     tx = { TransactionType: "Payment", Account: wallet.address, Destination: destination, Amount: amountVal };
+                }
+                if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
+                return tx;
+            };
+
             const executeSingleTx = async () => {
                 if(!client) return; setLoading(true);
                 try {
-                    let amountVal = currencyType === 'XRP' ? xrpl.xrpToDrops(amount) : { currency: iouCurrency, issuer: iouIssuer, value: amount };
-                    
-                    let tx;
-                    if (paymentMode === 'CHECK') {
-                         tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: destAddress.trim(), SendMax: amountVal };
-                    } else {
-                         // Direct Payment
-                         tx = { TransactionType: "Payment", Account: wallet.address, Destination: destAddress.trim(), Amount: amountVal };
-                    }
-
-                    if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
+                    const tx = buildTransaction(destAddress.trim(), amount);
                     
                     const res = await client.submitAndWait(tx, { wallet });
                     if(res.result.meta.TransactionResult === "tesSUCCESS") { 
@@ -1652,16 +1654,7 @@
                     const parts = line.split(','); const addr = parts[0].trim(); const amt = parts[1] ? parts[1].trim() : amount;
                     if(!xrpl.isValidAddress(addr) || !amt) continue;
                     try {
-                        let amountVal = currencyType === 'XRP' ? xrpl.xrpToDrops(amt) : { currency: iouCurrency, issuer: iouIssuer, value: amt };
-                        
-                        let tx;
-                        if (paymentMode === 'CHECK') {
-                            tx = { TransactionType: "CheckCreate", Account: wallet.address, Destination: addr, SendMax: amountVal };
-                        } else {
-                            tx = { TransactionType: "Payment", Account: wallet.address, Destination: addr, Amount: amountVal };
-                        }
-
-                        if(memo) tx.Memos = [{ Memo: { MemoData: xrpl.convertStringToHex(memo) } }];
+                        const tx = buildTransaction(addr, amt);
                         const res = await client.submitAndWait(tx, { wallet });
                         if(res.result.meta.TransactionResult === "tesSUCCESS") { sent++; payServiceFee(); addLog(`Sent to ${addr.substring(0,4)}`, "success"); }
                     } catch(e) {}
